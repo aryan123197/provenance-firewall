@@ -44,6 +44,8 @@ Status: **Confirmed** = agreed by PayPal's documentation as summarised by search
 
 ## First run against the sandbox: what to do and what to watch
 
+Run `pnpm preflight` first. It reports which variables are missing, whether the sandbox host is reachable from this environment, and whether PayPal accepts the credentials, without printing any secret.
+
 1. `pnpm e2e` with the sandbox credentials. Expect one payout and a `pending` status. A 400 here is almost certainly a body-shape mismatch from the Payouts table above; the error text is in the exception.
 2. Run it again without changing anything: the retry must not create a second payout. Check the sandbox activity for exactly one.
 3. `pnpm register:webhook https://<public-host>/api/webhooks/paypal`, set `PAYPAL_WEBHOOK_ID`, restart, then send a test event from the developer dashboard. A rejected signature means a `verify` mismatch.

@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "pnpm typecheck && pnpm test",
+    "preflight": "tsx scripts/preflight.ts",
     "e2e": "tsx scripts/e2e.ts",
     "harness": "tsx scripts/harness.ts",
     "start": "tsx packages/server/src/main.ts",
