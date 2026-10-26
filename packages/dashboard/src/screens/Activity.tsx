@@ -1,6 +1,6 @@
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { api, type DecisionSummary, type DemoRun, type DemoScenario } from "../api";
 import { Card, Empty, ErrorNote, TrustChip, VerdictPill } from "../components/ui";
 import { usePoll } from "../hooks";
@@ -11,12 +11,28 @@ export function Activity({ open, demo, llm, onChange }: { open: (to: string) => 
   const { data, error, refresh } = usePoll(api.decisions, 2500);
   const [filter, setFilter] = useState("");
   const [verdict, setVerdict] = useState<"all" | DecisionSummary["verdict"]>("all");
+  const gridBox = useRef<HTMLDivElement>(null);
 
   const rows = useMemo(() => (data ?? []).filter((d) => verdict === "all" || d.verdict === verdict), [data, verdict]);
 
   const cols = useMemo<ColDef<DecisionSummary>[]>(
     () => [
-      { headerName: "Time", field: "createdAt", width: 112, valueFormatter: (p) => time(p.value as string), sort: "desc", filter: "agDateColumnFilter", comparator: (a: string, b: string) => a.localeCompare(b) },
+      {
+        headerName: "Time",
+        field: "createdAt",
+        width: 118,
+        sort: "desc",
+        filter: "agDateColumnFilter",
+        comparator: (a: string, b: string) => a.localeCompare(b),
+        valueFormatter: (p) => time(p.value as string),
+        // A real link, so the replay is reachable from the keyboard and by assistive technology, not only by clicking the row.
+        cellRenderer: (p: ICellRendererParams<DecisionSummary>) =>
+          p.data ? (
+            <a href={`#/decision/${encodeURIComponent(p.data.idempotencyKey)}`} aria-label={`Open decision from ${time(p.data.createdAt)}: ${p.data.payee}, ${money(p.data.amount, p.data.currency)}`}>
+              {time(p.data.createdAt)}
+            </a>
+          ) : null,
+      },
       { headerName: "Verdict", field: "verdict", width: 170, cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <VerdictPill verdict={p.data.verdict} /> : null) },
       { headerName: "Rule that decided", field: "rule", flex: 1.3, minWidth: 190, valueFormatter: (p) => ruleTitle(p.value as string), cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <span>{ruleTitle(p.data.rule)}{p.data.alert && <span className="alert-dot" title="Raised an alert"> ⚑</span>}</span> : null) },
       { headerName: "Payee", field: "payee", flex: 1.2, minWidth: 160 },
@@ -46,12 +62,25 @@ export function Activity({ open, demo, llm, onChange }: { open: (to: string) => 
         }
       >
         {error && <ErrorNote message={error} />}
+        {rows.length > 0 && (
+          <a
+            className="skip-inline"
+            href="#decisions"
+            onClick={(e) => {
+              // The grid puts every column header and filter in the tab order; this jumps straight to the first decision.
+              e.preventDefault();
+              gridBox.current?.querySelector<HTMLAnchorElement>(".ag-row a")?.focus();
+            }}
+          >
+            Skip to the decisions
+          </a>
+        )}
         {data && data.length === 0 ? (
           <Empty title="No payment intents yet">
             {demo ? "Run an attack scenario above to see the firewall decide." : "Decisions appear here the moment an agent proposes a payment."}
           </Empty>
         ) : (
-          <div className="grid-wrap" style={rows.length > 12 ? { height: 560 } : undefined}>
+          <div className="grid-wrap" ref={gridBox} style={rows.length > 12 ? { height: 560 } : undefined}>
             <AgGridReact<DecisionSummary>
               theme={gridTheme}
               rowData={rows}

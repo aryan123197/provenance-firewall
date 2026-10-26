@@ -297,3 +297,9 @@ textarea:disabled, input:disabled { opacity: 0.6; }
 .form-title { margin: 20px 0 10px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
 .banner .check { margin-top: 8px; font-weight: 500; }
+
+.ag-cell a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.ag-cell a:hover { text-decoration: underline; }
+
+.skip-inline { position: absolute; left: -9999px; }
+.skip-inline:focus { position: static; display: inline-block; margin-bottom: 10px; font-weight: 600; }

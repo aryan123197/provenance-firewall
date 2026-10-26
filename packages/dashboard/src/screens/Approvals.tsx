@@ -33,7 +33,19 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
 
   const cols = useMemo<ColDef<Approval>[]>(
     () => [
-      { headerName: "Decided", field: "resolvedAt", width: 170, valueFormatter: (p) => (p.value ? dateTime(p.value as string) : ""), sort: "desc" },
+      {
+        headerName: "Decided",
+        field: "resolvedAt",
+        width: 180,
+        sort: "desc",
+        valueFormatter: (p) => (p.value ? dateTime(p.value as string) : ""),
+        cellRenderer: (p: { data?: Approval; value?: string }) =>
+          p.data ? (
+            <a href={`#/decision/${encodeURIComponent(p.data.idempotencyKey)}`} aria-label={`Open the decision for ${String(p.data.intent.payee.value)}`}>
+              {p.value ? dateTime(p.value) : "Open"}
+            </a>
+          ) : null,
+      },
       { headerName: "Result", field: "status", width: 120, cellRenderer: (p: { value: string }) => <span className={`status-chip ${p.value === "approved" ? "ok" : "bad"}`}>{p.value === "approved" ? "Approved" : "Rejected"}</span> },
       { headerName: "Payee", valueGetter: (p) => String(p.data?.intent.payee.value ?? ""), flex: 1, minWidth: 150 },
       { headerName: "Amount", valueGetter: (p) => p.data?.intent.amount.value ?? 0, type: "rightAligned", width: 130, valueFormatter: (p) => money(p.value as number) },
