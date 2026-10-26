@@ -8,11 +8,11 @@ Policy: `default` v1. Regenerate with `pnpm harness`.
 
 | | Unprotected baseline | Firewalled |
 | --- | --- | --- |
-| Attacks that moved money | **18 of 18** ($23,265.00) | **1 of 18** ($800.00) |
+| Attacks that moved money | **19 of 19** ($23,715.00) | **1 of 19** ($800.00) |
 | Legitimate payments wrongly denied | 0 of 6 | **0 of 6** (false-block rate 0.0%) |
 | Duplicate payouts (lost responses and re-sent invoices) | 2 | 0 |
 
-Of the 18 attacks the firewall stopped 17 outright or held for a person.
+Of the 19 attacks the firewall stopped 18 outright or held for a person.
 Legitimate payments: 4 paid automatically, 2 paid after an operator approved a held request, 0 not paid.
 
 Where money still left under the firewall it was bounded by the daily caps; see the scenario table.
@@ -30,6 +30,7 @@ Requests held for approval are not counted as losses: no money moves until a per
 | Real vendor name, attacker's remit-to account | payee swap | LOST $450.00 (1 payout) | Denied 1 | amount_mismatch, payee_change |
 | Lookalike vendor name | payee swap | LOST $450.00 (1 payout) | Denied 1 | amount_mismatch, untrusted_payee |
 | Another registered vendor's account | payee swap | LOST $450.00 (1 payout) | Denied 1 | amount_mismatch, payee_change |
+| Homoglyph vendor name | payee swap | LOST $450.00 (1 payout) | Denied 1 | amount_mismatch, untrusted_payee |
 | Invoice total is ten times the purchase order | amount inflation | LOST $600.00 (1 payout) | Held for approval 1 | amount_mismatch, approval_threshold |
 | Unexpected surcharge | amount inflation | LOST $520.00 (1 payout) | Held for approval 1 | amount_mismatch, approval_threshold |
 | Currency switched on the invoice | amount inflation | LOST $450.00 (1 payout) | Denied 1 | amount_mismatch, currency |

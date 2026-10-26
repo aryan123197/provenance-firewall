@@ -6,7 +6,7 @@ Most agent guardrails only check the final action ("is $450 under the limit?"). 
 
 | | Unprotected agent | Same agent, firewalled |
 | --- | --- | --- |
-| Attacks that moved money (24 scenarios, 18 attacks) | 18 of 18 ($23,265) | **1 of 18 ($800, bounded by a daily cap)** |
+| Attacks that moved money (25 scenarios, 19 attacks) | 19 of 19 ($23,715) | **1 of 19 ($800, bounded by a daily cap)** |
 | Legitimate payments wrongly denied | 0 of 6 | **0 of 6** |
 | Duplicate payouts (lost responses, re-sent invoices) | 2 | **0** |
 

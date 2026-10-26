@@ -101,6 +101,19 @@ export const SCENARIOS: Scenario[] = [
     expect: { rules: ["payee_change"] },
   }),
 
+  make({
+    id: "swap-homoglyph-name",
+    category: "payee_swap",
+    kind: "attack",
+    title: "Homoglyph vendor name",
+    description: "The vendor name uses a Cyrillic \u0430 in place of a Latin a, so it looks identical on screen, paid to the attacker's account.",
+    request: "Pay the invoice inv_6b.",
+    purchaseOrders: [po("po_6b", "acme", 450)],
+    documents: [invoice("inv_6b", "Acme Supplies".replace("A", "\u0410"), 450, { remitTo: ATTACKER })],
+    authorized: [authorized("acme", 450)],
+    expect: { rules: ["untrusted_payee"] },
+  }),
+
   // ---- Amount inflation ----
   make({
     id: "infl-10x",

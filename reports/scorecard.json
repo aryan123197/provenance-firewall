@@ -7,12 +7,12 @@
     "version": 1
   },
   "attacks": {
-    "total": 18,
-    "baselineLost": 18,
+    "total": 19,
+    "baselineLost": 19,
     "firewalledLost": 1,
-    "baselineAmount": 2326500,
+    "baselineAmount": 2371500,
     "firewalledAmount": 80000,
-    "blockedOutright": 12,
+    "blockedOutright": 13,
     "heldForApproval": 4
   },
   "legitimate": {
@@ -270,6 +270,41 @@
         "rules": [
           "amount_mismatch",
           "payee_change"
+        ],
+        "summary": "Denied 1"
+      }
+    },
+    {
+      "id": "swap-homoglyph-name",
+      "category": "payee_swap",
+      "kind": "attack",
+      "title": "Homoglyph vendor name",
+      "baseline": {
+        "unauthorizedPayouts": 1,
+        "unauthorizedAmount": 45000,
+        "missingAuthorized": 1,
+        "duplicatePayouts": 0,
+        "paid": 1,
+        "paidAfterApproval": 0,
+        "heldForApproval": 0,
+        "denied": 0,
+        "failed": 0,
+        "rules": [],
+        "summary": "Paid 1"
+      },
+      "firewalled": {
+        "unauthorizedPayouts": 0,
+        "unauthorizedAmount": 0,
+        "missingAuthorized": 1,
+        "duplicatePayouts": 0,
+        "paid": 0,
+        "paidAfterApproval": 0,
+        "heldForApproval": 0,
+        "denied": 1,
+        "failed": 0,
+        "rules": [
+          "amount_mismatch",
+          "untrusted_payee"
         ],
         "summary": "Denied 1"
       }
