@@ -44,7 +44,31 @@ CREATE TABLE IF NOT EXISTS executions (
   state           TEXT NOT NULL CHECK (state IN ('executed', 'failed')),
   retryable       INTEGER NOT NULL DEFAULT 0,
   payload_json    TEXT NOT NULL,
+  reference       TEXT,
+  request_id      TEXT,
+  provider_status TEXT,
   updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS executions_reference ON executions(reference);
+CREATE INDEX IF NOT EXISTS executions_request_id ON executions(request_id);
+
+-- Provider webhook events already processed (providers retry deliveries).
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id          TEXT PRIMARY KEY,
+  type        TEXT NOT NULL,
+  received_at TEXT NOT NULL
+);
+
+-- Places where the provider's records disagree with ours. Opened by reconciliation, resolved if they turn out to be a race.
+CREATE TABLE IF NOT EXISTS drift (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind        TEXT NOT NULL CHECK (kind IN ('unmatched_payment', 'detail_mismatch')),
+  reference   TEXT NOT NULL,
+  detail_json TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+  created_at  TEXT NOT NULL,
+  resolved_at TEXT,
+  UNIQUE (kind, reference)
 );
 -- Pending and resolved human approvals. One per idempotency key, bound to that exact intent.
 CREATE TABLE IF NOT EXISTS approvals (

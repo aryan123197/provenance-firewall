@@ -1,1 +1,1 @@
-export { Firewall, type FirewallConfig, type Outcome } from "./firewall";
+export { Firewall, type ApprovalOutcome, type FirewallConfig, type Outcome, type WebhookOutcome } from "./firewall";

@@ -5,7 +5,11 @@ export {
   type Approval,
   type ApprovalGrant,
   type DecideResult,
+  type Drift,
+  type DriftKind,
   type ExecutionRecord,
+  type ProviderEventInput,
+  type ReconcileResult,
   type ResolveApprovalResult,
   type StoreOptions,
 } from "./store";

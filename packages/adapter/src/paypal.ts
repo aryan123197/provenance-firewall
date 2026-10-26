@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Authority, AllowedIntent } from "./authority";
 import { formatAmount } from "./money";
+import { parseMinorUnits, type ProviderEvent, type WebhookVerifier } from "./webhook";
 import { AdapterError, type PaymentAdapter, type PaymentProposal, type PaymentReceipt, type PaymentStatus } from "./types";
 
 export const PAYPAL_SANDBOX_URL = "https://api-m.sandbox.paypal.com";
@@ -14,6 +15,8 @@ export interface PayPalConfig {
   fetch?: typeof fetch;
   timeoutMs?: number;
   now?: () => number;
+  /** The webhook id PayPal assigns when you register the endpoint. Needed only for `verify`. */
+  webhookId?: string;
 }
 
 interface PayoutBody {
@@ -29,7 +32,7 @@ interface PayoutBody {
 
 const stable = (key: string) => `pfw-${createHash("sha256").update(key).digest("hex").slice(0, 32)}`;
 
-function mapStatus(s: string | undefined): PaymentStatus {
+export function mapPayPalStatus(s: string | undefined): PaymentStatus {
   switch (s) {
     case "SUCCESS":
       return "success";
@@ -55,7 +58,7 @@ function mapStatus(s: string | undefined): PaymentStatus {
 }
 
 /** PayPal Payouts (sandbox). The account on a payment is the receiver's PayPal email or PayPal ID. */
-export class PayPalAdapter implements PaymentAdapter {
+export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
   private readonly base: string;
   private readonly f: typeof fetch;
   private readonly now: () => number;
@@ -106,7 +109,7 @@ export class PayPalAdapter implements PaymentAdapter {
       idempotencyKey: intent.idempotencyKey,
       requestId: proposal.requestId,
       reference,
-      status: mapStatus(res.batch_header?.batch_status),
+      status: mapPayPalStatus(res.batch_header?.batch_status),
       amount: intent.amount.value,
       currency: intent.currency.value,
       receiver: intent.account.value,
@@ -119,7 +122,31 @@ export class PayPalAdapter implements PaymentAdapter {
       batch_header?: { batch_status?: string };
       items?: { transaction_status?: string }[];
     };
-    return mapStatus(res.items?.[0]?.transaction_status ?? res.batch_header?.batch_status);
+    return mapPayPalStatus(res.items?.[0]?.transaction_status ?? res.batch_header?.batch_status);
+  }
+
+  /** Asks PayPal to verify the webhook signature, so a forged notification cannot move our records. */
+  async verify(headers: Record<string, string | undefined>, rawBody: string): Promise<boolean> {
+    if (!this.cfg.webhookId) throw new Error("webhookId is required to verify webhooks");
+    const h = (k: string) => headers[k];
+    const needed = ["paypal-auth-algo", "paypal-cert-url", "paypal-transmission-id", "paypal-transmission-sig", "paypal-transmission-time"];
+    if (needed.some((k) => !h(k))) return false;
+    let event: unknown;
+    try {
+      event = JSON.parse(rawBody);
+    } catch {
+      return false;
+    }
+    const res = (await this.call("POST", "/v1/notifications/verify-webhook-signature", {
+      auth_algo: h("paypal-auth-algo"),
+      cert_url: h("paypal-cert-url"),
+      transmission_id: h("paypal-transmission-id"),
+      transmission_sig: h("paypal-transmission-sig"),
+      transmission_time: h("paypal-transmission-time"),
+      webhook_id: this.cfg.webhookId,
+      webhook_event: event,
+    })) as { verification_status?: string };
+    return res.verification_status === "SUCCESS";
   }
 
   private async accessToken(): Promise<string> {
@@ -167,4 +194,57 @@ export class PayPalAdapter implements PaymentAdapter {
     const retryable = res.status >= 500 || res.status === 429 || res.status === 408;
     throw new AdapterError(`PayPal ${res.status}: ${detail}`, retryable, res.status);
   }
+}
+
+interface PayPalEvent {
+  id?: string;
+  event_type?: string;
+  resource?: {
+    batch_header?: {
+      payout_batch_id?: string;
+      batch_status?: string;
+      amount?: { value?: string; currency?: string };
+      sender_batch_header?: { sender_batch_id?: string };
+    };
+    payout_batch_id?: string;
+    transaction_status?: string;
+    payout_item?: { receiver?: string; sender_item_id?: string; amount?: { value?: string; currency?: string } };
+  };
+}
+
+/** Payouts batch and item events become a ProviderEvent. Other event types return null and are ignored. */
+export function parsePayPalEvent(raw: unknown): ProviderEvent | null {
+  const e = raw as PayPalEvent | null;
+  if (!e || typeof e.id !== "string" || typeof e.event_type !== "string") return null;
+  const r = e.resource ?? {};
+  const base = { id: e.id, provider: "paypal" as const, type: e.event_type };
+  if (e.event_type.startsWith("PAYMENT.PAYOUTSBATCH.")) {
+    const b = r.batch_header ?? {};
+    return pick({
+      ...base,
+      reference: b.payout_batch_id,
+      senderRef: b.sender_batch_header?.sender_batch_id,
+      status: mapPayPalStatus(b.batch_status),
+      amount: parseMinorUnits(b.amount?.value),
+      currency: b.amount?.currency,
+    });
+  }
+  if (e.event_type.startsWith("PAYMENT.PAYOUTS-ITEM.")) {
+    const i = r.payout_item ?? {};
+    return pick({
+      ...base,
+      reference: r.payout_batch_id,
+      senderRef: i.sender_item_id,
+      status: mapPayPalStatus(r.transaction_status),
+      amount: parseMinorUnits(i.amount?.value),
+      currency: i.amount?.currency,
+      receiver: i.receiver,
+    });
+  }
+  return null;
+}
+
+/** Drops undefined fields, which the ProviderEvent type does not allow. */
+function pick(o: Record<string, unknown>): ProviderEvent {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as unknown as ProviderEvent;
 }

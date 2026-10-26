@@ -213,3 +213,26 @@ describe("PayPalAdapter", () => {
     await expect(adapter.status("nope")).rejects.toMatchObject({ httpStatus: 404 });
   });
 });
+
+describe("webhook parsing and verification", () => {
+  test("parseMinorUnits", async () => {
+    const { parseMinorUnits } = await import("./webhook");
+    expect(parseMinorUnits("45.00")).toBe(4500);
+    expect(parseMinorUnits("0.5")).toBe(50);
+    expect(parseMinorUnits("12")).toBe(1200);
+    for (const bad of ["1.234", "-1", "abc", "", 5, undefined]) expect(parseMinorUnits(bad)).toBeUndefined();
+  });
+  test("verify sends PayPal's verification request and trusts only SUCCESS", async () => {
+    const fake = createFakePayPal();
+    const adapter = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: fake.fetch, webhookId: "WH-TEST" });
+    const { fakeWebhookHeaders } = await import("./testing/fake-paypal");
+    expect(await adapter.verify(fakeWebhookHeaders(), '{"id":"x"}')).toBe(true);
+    expect(await adapter.verify(fakeWebhookHeaders("nope"), '{"id":"x"}')).toBe(false);
+    expect(await adapter.verify({}, '{"id":"x"}')).toBe(false);
+    expect(await adapter.verify(fakeWebhookHeaders(), "not json")).toBe(false);
+  });
+  test("verify needs a webhook id", async () => {
+    const { adapter } = setup();
+    await expect(adapter.verify({}, "{}")).rejects.toThrow(/webhookId/);
+  });
+});

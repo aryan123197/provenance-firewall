@@ -31,7 +31,41 @@ export interface ExecutionRecord {
   state: "executed" | "failed";
   retryable: boolean;
   payload: unknown;
+  /** Provider's id for the payment and our request id sent to it, used to match webhooks. */
+  reference?: string;
+  requestId?: string;
 }
+
+/** A provider notification reduced to what reconciliation needs (the adapter's ProviderEvent fits this shape). */
+export interface ProviderEventInput {
+  id: string;
+  type: string;
+  reference?: string;
+  senderRef?: string;
+  status: string;
+  amount?: number;
+  currency?: string;
+  receiver?: string;
+}
+
+export type ReconcileResult =
+  | { result: "duplicate" }
+  | { result: "matched"; idempotencyKey: string; providerStatus: string }
+  | { result: "drift"; kind: DriftKind; reference: string };
+
+export type DriftKind = "unmatched_payment" | "detail_mismatch";
+
+export interface Drift {
+  id: number;
+  kind: DriftKind;
+  reference: string;
+  detail: unknown;
+  status: "open" | "resolved";
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+const STATUS_RANK: Record<string, number> = { unknown: 0, pending: 0, unclaimed: 1, success: 2, failed: 2, returned: 3 };
 
 export class ApprovalStateError extends Error {
   constructor(message: string) {
@@ -273,26 +307,116 @@ export class Store {
     return r ? toApproval(r) : null;
   }
 
-  getExecution(key: string): ExecutionRecord | null {
-    const r = this.db.prepare("SELECT state, retryable, payload_json FROM executions WHERE idempotency_key = ?").get(key) as
-      | { state: "executed" | "failed"; retryable: number; payload_json: string }
+  getExecution(key: string): (ExecutionRecord & { providerStatus: string | null }) | null {
+    const r = this.db
+      .prepare("SELECT state, retryable, payload_json, reference, request_id, provider_status FROM executions WHERE idempotency_key = ?")
+      .get(key) as
+      | { state: "executed" | "failed"; retryable: number; payload_json: string; reference: string | null; request_id: string | null; provider_status: string | null }
       | undefined;
-    return r ? { state: r.state, retryable: r.retryable === 1, payload: JSON.parse(r.payload_json) as unknown } : null;
+    if (!r) return null;
+    return {
+      state: r.state,
+      retryable: r.retryable === 1,
+      payload: JSON.parse(r.payload_json) as unknown,
+      ...(r.reference ? { reference: r.reference } : {}),
+      ...(r.request_id ? { requestId: r.request_id } : {}),
+      providerStatus: r.provider_status,
+    };
   }
 
   saveExecution(key: string, rec: ExecutionRecord): void {
     this.db
       .transaction(() => {
+        const at = this.clock().toISOString();
         this.db
           .prepare(
-            `INSERT INTO executions (idempotency_key, state, retryable, payload_json, updated_at) VALUES (?, ?, ?, ?, ?)
+            `INSERT INTO executions (idempotency_key, state, retryable, payload_json, reference, request_id, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(idempotency_key) DO UPDATE SET state = excluded.state, retryable = excluded.retryable,
-               payload_json = excluded.payload_json, updated_at = excluded.updated_at`,
+               payload_json = excluded.payload_json, reference = COALESCE(excluded.reference, reference),
+               request_id = COALESCE(excluded.request_id, request_id), updated_at = excluded.updated_at`,
           )
-          .run(key, rec.state, rec.retryable ? 1 : 0, JSON.stringify(rec.payload), this.clock().toISOString());
+          .run(key, rec.state, rec.retryable ? 1 : 0, JSON.stringify(rec.payload), rec.reference ?? null, rec.requestId ?? null, at);
         this.audit.append("execution", { idempotencyKey: key, state: rec.state, retryable: rec.retryable, payload: rec.payload });
+
+        // A webhook can arrive before we finish recording the payment. Once we have it, that "unmatched" event was a race.
+        if (rec.reference) {
+          const open = this.db
+            .prepare("SELECT id, detail_json FROM drift WHERE kind = 'unmatched_payment' AND reference = ? AND status = 'open'")
+            .all(rec.reference) as { id: number; detail_json: string }[];
+          for (const d of open) {
+            const ev = (JSON.parse(d.detail_json) as { event?: ProviderEventInput }).event;
+            this.db.prepare("UPDATE drift SET status = 'resolved', resolved_at = ? WHERE id = ?").run(at, d.id);
+            if (ev) this.applyProviderStatus(key, ev.status);
+            this.audit.append("drift_resolved", { driftId: d.id, reference: rec.reference, idempotencyKey: key, reason: "event arrived before the payment was recorded" });
+          }
+        }
       })
       .immediate();
+  }
+
+  /**
+   * Match a provider notification against what we executed. Anything the provider did that we have no decision for,
+   * or that differs from what was approved (amount, currency, receiver), opens a drift record.
+   */
+  recordProviderEvent(ev: ProviderEventInput): ReconcileResult {
+    return this.db.transaction((): ReconcileResult => {
+      const at = this.clock().toISOString();
+      if (this.db.prepare("SELECT 1 FROM webhook_events WHERE id = ?").get(ev.id)) return { result: "duplicate" };
+      this.db.prepare("INSERT INTO webhook_events (id, type, received_at) VALUES (?, ?, ?)").run(ev.id, ev.type, at);
+
+      const exec = this.db
+        .prepare(
+          `SELECT e.idempotency_key AS key, d.decision_json FROM executions e JOIN decisions d ON d.idempotency_key = e.idempotency_key
+           WHERE (e.reference IS NOT NULL AND e.reference = ?) OR (e.request_id IS NOT NULL AND e.request_id = ?) LIMIT 1`,
+        )
+        .get(ev.reference ?? null, ev.senderRef ?? null) as { key: string; decision_json: string } | undefined;
+
+      const ref = ev.reference ?? ev.senderRef ?? ev.id;
+      const openDrift = (kind: DriftKind, detail: unknown): ReconcileResult => {
+        const r = this.db
+          .prepare("INSERT OR IGNORE INTO drift (kind, reference, detail_json, created_at) VALUES (?, ?, ?, ?)")
+          .run(kind, ref, JSON.stringify(detail), at);
+        if (r.changes > 0) this.audit.append("drift", { kind, reference: ref, eventId: ev.id, detail });
+        return { result: "drift", kind, reference: ref };
+      };
+
+      if (!exec) return openDrift("unmatched_payment", { event: ev, note: "the provider reports a payment with no matching decision" });
+
+      const f = (JSON.parse(exec.decision_json) as Decision).fields;
+      const mismatches: string[] = [];
+      if (ev.amount !== undefined && ev.amount !== f.amount.value) mismatches.push(`amount ${ev.amount} but ${f.amount.value} was authorized`);
+      if (ev.currency !== undefined && ev.currency !== f.currency.value) mismatches.push(`currency ${ev.currency} but ${f.currency.value} was authorized`);
+      if (ev.receiver !== undefined && ev.receiver !== f.account.value) mismatches.push(`receiver ${ev.receiver} but ${f.account.value} was authorized`);
+
+      this.applyProviderStatus(exec.key, ev.status);
+      this.audit.append("webhook", { eventId: ev.id, type: ev.type, idempotencyKey: exec.key, status: ev.status });
+      if (mismatches.length) return openDrift("detail_mismatch", { idempotencyKey: exec.key, event: ev, mismatches });
+      return { result: "matched", idempotencyKey: exec.key, providerStatus: ev.status };
+    }).immediate();
+  }
+
+  listDrift(status?: Drift["status"]): Drift[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM drift ${status ? "WHERE status = ?" : ""} ORDER BY id`)
+      .all(...(status ? [status] : [])) as { id: number; kind: DriftKind; reference: string; detail_json: string; status: Drift["status"]; created_at: string; resolved_at: string | null }[];
+    return rows.map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      reference: r.reference,
+      detail: JSON.parse(r.detail_json) as unknown,
+      status: r.status,
+      createdAt: r.created_at,
+      resolvedAt: r.resolved_at,
+    }));
+  }
+
+  /** Statuses only move forward: a late "pending" event never undoes a "success". */
+  private applyProviderStatus(key: string, status: string): void {
+    const cur = this.db.prepare("SELECT provider_status FROM executions WHERE idempotency_key = ?").get(key) as { provider_status: string | null } | undefined;
+    if (!cur) return;
+    if (cur.provider_status && (STATUS_RANK[status] ?? 0) < (STATUS_RANK[cur.provider_status] ?? 0)) return;
+    this.db.prepare("UPDATE executions SET provider_status = ? WHERE idempotency_key = ?").run(status, key);
   }
 
   private matchVendor(i: ResolvedIntent): VendorRecord | null {

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test } from "vitest";
 import { ProvenanceContext, loadPolicy } from "@pfw/core";
 import { Authority, PayPalAdapter, type AllowedIntent, type PaymentAdapter } from "@pfw/adapter";
-import { createFakePayPal } from "@pfw/adapter/testing";
+import { createFakePayPal, fakeWebhookHeaders } from "@pfw/adapter/testing";
 import { Store } from "@pfw/store";
 import { Firewall, type Outcome } from "./index";
 
@@ -30,8 +30,8 @@ beforeEach(() => {
   store.upsertVendor({ id: "acme", name: "Acme Supplies", account: "acme@sandbox.example", category: "office_supplies" });
   store.addPurchaseOrder({ id: "po1", vendorId: "acme", amount: 4500, currency: "USD" });
   fake = createFakePayPal();
-  const adapter = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: fake.fetch });
-  fw = new Firewall({ store, adapter, authority, policy });
+  const adapter = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: fake.fetch, webhookId: "WH-TEST" });
+  fw = new Firewall({ store, adapter, authority, policy, webhooks: adapter });
 
   ctx = new ProvenanceContext();
   ctx.register("vendor:acme#name", "Acme Supplies");
@@ -225,5 +225,96 @@ describe("approval flow", () => {
     expect(store.audit.verify()).toMatchObject({ ok: true, count: 4 });
     const spent = store.db.prepare("SELECT SUM(amount) AS t FROM payments").get() as { t: number };
     expect(spent.t).toBe(45000);
+  });
+});
+
+describe("webhook reconciliation", () => {
+  const itemEvent = (o: { id?: string; batch: string; status?: string; senderItemId?: string; amount?: string; receiver?: string; type?: string }) =>
+    JSON.stringify({
+      id: o.id ?? "WH-EVT-1",
+      event_type: o.type ?? "PAYMENT.PAYOUTS-ITEM.SUCCEEDED",
+      resource: {
+        payout_batch_id: o.batch,
+        transaction_status: o.status ?? "SUCCESS",
+        payout_item: { receiver: o.receiver ?? "acme@sandbox.example", sender_item_id: o.senderItemId ?? "unrelated", amount: { value: o.amount ?? "45.00", currency: "USD" } },
+      },
+    });
+  const pay = async () => {
+    const o = await fw.submit(proposal(), ctx);
+    if (o.status !== "executed") throw new Error("expected executed");
+    return o.receipt;
+  };
+  const hook = (body: string, sig = "valid-sig") => fw.handleWebhook(fakeWebhookHeaders(sig), body);
+
+  test("a verified event for our payment updates its provider status", async () => {
+    const r = await pay();
+    expect(await hook(itemEvent({ batch: r.reference }))).toMatchObject({ status: "processed", result: "matched", providerStatus: "success" });
+    expect(store.getExecution("pay-1")?.providerStatus).toBe("success");
+    expect(store.listDrift()).toHaveLength(0);
+  });
+  test("an event is matched by our own id when the batch id is unfamiliar", async () => {
+    const r = await pay();
+    expect(await hook(itemEvent({ batch: "SOMETHINGELSE", senderItemId: r.requestId }))).toMatchObject({ result: "matched" });
+  });
+  test("a payment PayPal reports that we never authorized is flagged as drift", async () => {
+    await pay();
+    const res = await hook(itemEvent({ id: "WH-EVT-2", batch: "ATTACKERBATCH" }));
+    expect(res).toMatchObject({ status: "processed", result: "drift", kind: "unmatched_payment", reference: "ATTACKERBATCH" });
+    expect(store.listDrift("open")).toHaveLength(1);
+    expect(store.audit.entries().some((e) => e.type === "drift")).toBe(true);
+  });
+  test("a different amount or receiver than authorized is drift, even for our batch", async () => {
+    const r = await pay();
+    expect(await hook(itemEvent({ batch: r.reference, amount: "450.00", receiver: "attacker@evil.example" }))).toMatchObject({ result: "drift", kind: "detail_mismatch" });
+    const d = store.listDrift("open")[0]!;
+    expect((d.detail as { mismatches: string[] }).mismatches).toHaveLength(2);
+  });
+  test("a retried delivery is processed once", async () => {
+    const r = await pay();
+    await hook(itemEvent({ batch: r.reference }));
+    expect(await hook(itemEvent({ batch: r.reference }))).toEqual({ status: "processed", result: "duplicate" });
+    expect(store.audit.entries().filter((e) => e.type === "webhook")).toHaveLength(1);
+  });
+  test("a forged or unsigned webhook is refused and changes nothing", async () => {
+    const r = await pay();
+    const before = store.audit.entries().length;
+    expect(await hook(itemEvent({ batch: r.reference }), "forged")).toEqual({ status: "rejected", reason: "invalid signature" });
+    expect(await fw.handleWebhook({}, itemEvent({ batch: r.reference }))).toMatchObject({ status: "rejected" });
+    expect(store.audit.entries()).toHaveLength(before);
+    expect(store.getExecution("pay-1")?.providerStatus).toBeNull();
+  });
+  test("without a verifier every webhook is refused", async () => {
+    const bare = new Firewall({ store, adapter: new PayPalAdapter({ clientId: "a", clientSecret: "b", authority, baseUrl: "http://localhost:1" }), authority, policy });
+    expect(await bare.handleWebhook(fakeWebhookHeaders(), "{}")).toMatchObject({ status: "rejected" });
+  });
+  test("unrelated event types are ignored", async () => {
+    expect(await hook(JSON.stringify({ id: "WH-X", event_type: "CUSTOMER.DISPUTE.CREATED", resource: {} }))).toEqual({ status: "ignored" });
+  });
+  test("a late pending event never undoes a final status", async () => {
+    const r = await pay();
+    await hook(itemEvent({ id: "e1", batch: r.reference, status: "SUCCESS" }));
+    await hook(itemEvent({ id: "e2", batch: r.reference, status: "PENDING", type: "PAYMENT.PAYOUTS-ITEM.HELD" }));
+    expect(store.getExecution("pay-1")?.providerStatus).toBe("success");
+  });
+  test("batch-level events are understood", async () => {
+    const r = await pay();
+    const body = JSON.stringify({
+      id: "WH-B1",
+      event_type: "PAYMENT.PAYOUTSBATCH.SUCCESS",
+      resource: { batch_header: { payout_batch_id: r.reference, batch_status: "SUCCESS", amount: { value: "45.00", currency: "USD" }, sender_batch_header: { sender_batch_id: r.requestId } } },
+    });
+    expect(await hook(body)).toMatchObject({ result: "matched", providerStatus: "success" });
+  });
+
+  test("an event that arrives before the payment is recorded is resolved, not left as false drift", async () => {
+    // PayPal's webhook beats our own bookkeeping: simulate by delivering the event, then recording the execution.
+    const r = await pay();
+    store.db.prepare("DELETE FROM executions WHERE idempotency_key = 'pay-1'").run();
+    expect(await hook(itemEvent({ id: "early", batch: r.reference }))).toMatchObject({ result: "drift", kind: "unmatched_payment" });
+    store.saveExecution("pay-1", { state: "executed", retryable: false, payload: r, reference: r.reference, requestId: r.requestId });
+    expect(store.listDrift("open")).toHaveLength(0);
+    expect(store.listDrift("resolved")).toHaveLength(1);
+    expect(store.getExecution("pay-1")?.providerStatus).toBe("success");
+    expect(store.audit.verify().ok).toBe(true);
   });
 });

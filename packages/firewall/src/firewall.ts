@@ -1,6 +1,6 @@
 import { resolveIntent, type Decision, type Policy, type ProvenanceContext, type ResolvedIntent } from "@pfw/core";
-import { AdapterError, type AllowedIntent, type Authority, type PaymentAdapter, type PaymentReceipt } from "@pfw/adapter";
-import type { Store } from "@pfw/store";
+import { AdapterError, parsePayPalEvent, type AllowedIntent, type Authority, type PaymentAdapter, type PaymentReceipt, type WebhookVerifier } from "@pfw/adapter";
+import type { ReconcileResult, Store } from "@pfw/store";
 
 type Failure = { message: string; retryable: boolean };
 
@@ -22,7 +22,14 @@ export interface FirewallConfig {
   adapter: PaymentAdapter;
   authority: Authority;
   policy: Policy;
+  /** Verifies provider webhook signatures. Without one, webhooks are refused. */
+  webhooks?: WebhookVerifier;
 }
+
+export type WebhookOutcome =
+  | { status: "rejected"; reason: string }
+  | { status: "ignored" }
+  | ({ status: "processed" } & ReconcileResult);
 
 /**
  * The single entry point for payments. The agent proposes handles, the firewall decides, and only an allow
@@ -46,6 +53,33 @@ export class Firewall {
     if (!res.ok) return { status: "blocked", reason: res.reason };
     const approval = store.getApproval(id)!;
     return this.once(approval.intent);
+  }
+
+  /**
+   * PayPal webhook entry point. Pass the raw request body exactly as received (the signature covers it).
+   * Payments PayPal reports that we did not authorize, or that differ from what we authorized, become drift.
+   */
+  async handleWebhook(headers: Record<string, string | undefined>, rawBody: string): Promise<WebhookOutcome> {
+    const { webhooks, store } = this.cfg;
+    if (!webhooks) return { status: "rejected", reason: "no webhook verifier configured" };
+    const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+    let ok = false;
+    try {
+      ok = await webhooks.verify(lower, rawBody);
+    } catch {
+      return { status: "rejected", reason: "signature could not be verified" };
+    }
+    if (!ok) return { status: "rejected", reason: "invalid signature" };
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawBody);
+    } catch {
+      return { status: "rejected", reason: "body is not JSON" };
+    }
+    const ev = parsePayPalEvent(parsed);
+    if (!ev) return { status: "ignored" };
+    return { status: "processed", ...store.recordProviderEvent(ev) };
   }
 
   // Concurrent calls with one key share a single run; the adapter's request id covers separate processes.
@@ -84,7 +118,13 @@ export class Firewall {
 
     try {
       const receipt = await adapter.execute(authorize());
-      store.saveExecution(intent.idempotencyKey, { state: "executed", retryable: false, payload: receipt });
+      store.saveExecution(intent.idempotencyKey, {
+        state: "executed",
+        retryable: false,
+        payload: receipt,
+        reference: receipt.reference,
+        requestId: receipt.requestId,
+      });
       return { status: "executed", decision, receipt, replayed };
     } catch (e) {
       if (!(e instanceof AdapterError)) throw e; // authorization or programming errors must not be swallowed

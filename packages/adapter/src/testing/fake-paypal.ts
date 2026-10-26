@@ -41,6 +41,10 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
     if (fault) return json(fault, { name: "FAULT" });
     if (headers.Authorization !== `Bearer ${validToken}`) return json(401, { name: "AUTHENTICATION_FAILURE" });
 
+    if (init.method === "POST" && url.pathname === "/v1/notifications/verify-webhook-signature") {
+      const b = body as { transmission_sig?: string; webhook_id?: string };
+      return json(200, { verification_status: b.transmission_sig === "valid-sig" && b.webhook_id === "WH-TEST" ? "SUCCESS" : "FAILURE" });
+    }
     if (init.method === "POST" && url.pathname === "/v1/payments/payouts") {
       const rid = headers["PayPal-Request-Id"];
       if (rid && byRequestId.has(rid)) {
@@ -78,3 +82,12 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
     payoutPosts: () => calls.filter((c) => c.method === "POST" && c.path === "/v1/payments/payouts"),
   };
 }
+
+/** Headers PayPal sends with a webhook. Only transmission_sig "valid-sig" passes the fake's verification. */
+export const fakeWebhookHeaders = (sig = "valid-sig"): Record<string, string> => ({
+  "paypal-auth-algo": "SHA256withRSA",
+  "paypal-cert-url": "https://api.sandbox.paypal.com/v1/notifications/certs/CERT-1",
+  "paypal-transmission-id": "tx-1",
+  "paypal-transmission-sig": sig,
+  "paypal-transmission-time": "2026-10-30T12:00:00Z",
+});
