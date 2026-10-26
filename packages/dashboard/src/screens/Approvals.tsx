@@ -16,8 +16,18 @@ const readName = () => {
   }
 };
 
+interface Notice {
+  id: number;
+  ok: boolean;
+  text: string;
+}
+let noticeSeq = 0;
+
 export function Approvals({ open, onChange }: { open: (to: string) => void; onChange: () => void }) {
   const { data, error, refresh } = usePoll(api.approvals, 2500);
+  // A resolved request leaves the inbox, so its outcome is shown here until dismissed rather than inside the card.
+  const [notices, setNotices] = useState<Notice[]>([]);
+  const notify = (ok: boolean, text: string) => setNotices((n) => [{ id: ++noticeSeq, ok, text }, ...n].slice(0, 5));
   const pending = (data ?? []).filter((a) => a.status === "pending");
   const history = (data ?? []).filter((a) => a.status !== "pending");
 
@@ -38,12 +48,22 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
     <div className="stack">
       <Card title={`Approval inbox${pending.length ? ` · ${pending.length} waiting` : ""}`} aside={<span className="muted small">Approving binds to this exact payment and works once.</span>}>
         {error && <ErrorNote message={error} />}
+        {notices.length > 0 && (
+          <ul className="notices" aria-live="polite">
+            {notices.map((n) => (
+              <li key={n.id} className={n.ok ? "ok" : "bad"}>
+                <span>{n.text}</span>
+                <button className="link" onClick={() => setNotices((all) => all.filter((x) => x.id !== n.id))} aria-label="Dismiss">Dismiss</button>
+              </li>
+            ))}
+          </ul>
+        )}
         {pending.length === 0 ? (
           <Empty title="Nothing waiting for you">Payments that need a person land here with the evidence to decide.</Empty>
         ) : (
           <div className="inbox">
             {pending.map((a) => (
-              <PendingCard key={a.id} a={a} open={open} onDone={() => { void refresh(); onChange(); }} />
+              <PendingCard key={a.id} a={a} open={open} notify={notify} onDone={() => { void refresh(); onChange(); }} />
             ))}
           </div>
         )}
@@ -70,7 +90,7 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
   );
 }
 
-function PendingCard({ a, open, onDone }: { a: Approval; open: (to: string) => void; onDone: () => void }) {
+function PendingCard({ a, open, onDone, notify }: { a: Approval; open: (to: string) => void; onDone: () => void; notify: (ok: boolean, text: string) => void }) {
   const [name, setName] = useState(readName);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<"approve" | "reject" | undefined>();
@@ -92,11 +112,14 @@ function PendingCard({ a, open, onDone }: { a: Approval; open: (to: string) => v
     setMsg(undefined);
     try {
       const r = await api.resolve(a.id, approve, name.trim(), note);
+      const who = String(a.intent.payee.value);
       if (r.status === "blocked") setMsg({ ok: false, text: `Cannot approve: ${r.reason} An approval cannot override a hard limit.` });
-      else if (r.status === "executed") setMsg({ ok: true, text: `Approved and paid ${money(r.receipt.amount, r.receipt.currency)} to ${r.receipt.receiver}.` });
-      else if (r.status === "execution_failed") setMsg({ ok: false, text: "Approved, but PayPal did not accept it yet. It will retry safely with the same request id." });
-      else setMsg({ ok: true, text: approve ? "Approved." : "Rejected. Nothing was sent." });
-      onDone();
+      else {
+        if (r.status === "executed") notify(true, `Approved and paid ${money(r.receipt.amount, r.receipt.currency)} to ${who} (${r.receipt.receiver}).`);
+        else if (r.status === "execution_failed") notify(false, `Approved ${who}, but PayPal did not accept it yet. It will retry safely with the same request id.`);
+        else notify(true, approve ? `Approved ${who}.` : `Rejected ${who}. Nothing was sent.`);
+        onDone();
+      }
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {

@@ -105,10 +105,39 @@ export type ApprovalResult =
   | { status: "rejected" | "needs_approval" | "denied" | "execution_failed" | "invalid" }
   | { status: "blocked"; reason: string };
 
+const TOKEN_KEY = "pfw.operatorToken";
+
+/** The operator token lives in this tab's session storage only: it is not persisted and not sent anywhere but our API. */
+export const operatorToken = {
+  get(): string {
+    try {
+      return sessionStorage.getItem(TOKEN_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  },
+  set(value: string) {
+    try {
+      if (value) sessionStorage.setItem(TOKEN_KEY, value);
+      else sessionStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* storage unavailable: the token lasts until reload via the in-memory fallback below */
+    }
+    memory = value;
+  },
+};
+let memory = "";
+const currentToken = () => operatorToken.get() || memory;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { ...init, headers: { "content-type": "application/json", ...(init?.headers ?? {}) } });
+  const token = init?.method === "POST" ? currentToken() : "";
+  const res = await fetch(path, {
+    ...init,
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}), ...(init?.headers ?? {}) },
+  });
   const text = await res.text();
   const body = text ? JSON.parse(text) : {};
+  if (res.status === 401) throw new Error("Operator sign-in required: enter the operator token in the header, then try again.");
   if (!res.ok) throw new Error((body as { error?: string }).error ?? `${res.status} ${res.statusText}`);
   return body as T;
 }
