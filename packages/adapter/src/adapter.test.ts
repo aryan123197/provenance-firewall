@@ -1,0 +1,191 @@
+import { describe, expect, test } from "vitest";
+import { evaluate, loadPolicy, tag, type Decision, type OriginKind, type PolicyState, type ResolvedIntent } from "@pfw/core";
+import { Authority, AdapterError, PayPalAdapter, UnauthorizedPaymentError, formatAmount, type AllowedIntent } from "./index";
+import { createFakePayPal } from "./testing/fake-paypal";
+
+const POLICY = loadPolicy(`
+name: t
+version: 1
+currency: USD
+approvalThreshold: 50000
+amountToleranceBps: 500
+limits: {perPayment: 100000, perVendorPerDay: 150000, totalPerDay: 300000}
+allowedCategories: [office_supplies]
+velocity: {maxPerHour: 5}
+`);
+const f = <T>(kind: OriginKind, value: T) => tag(value, { kind, ref: `${kind}:t` });
+const intent = (o: Partial<ResolvedIntent> = {}): ResolvedIntent => ({
+  agentId: "a1",
+  idempotencyKey: "key-1",
+  payee: f("vendor", "Acme Supplies"),
+  account: f("vendor", "acme@sandbox.example"),
+  amount: f("po", 4500),
+  currency: f("user", "USD"),
+  category: f("vendor", "office_supplies"),
+  ...o,
+});
+const state = (): PolicyState => ({
+  now: "2026-10-28T12:00:00.000Z",
+  vendors: [{ id: "acme", name: "Acme Supplies", account: "acme@sandbox.example", category: "office_supplies" }],
+  purchaseOrder: null,
+  vendorSpentToday: {},
+  totalSpentToday: 0,
+  paymentsLastHour: 0,
+});
+
+const authority = new Authority("test-authority-key-0123456789");
+const decide = (i: ResolvedIntent): Decision => evaluate(i, POLICY, state());
+const allowed = (i = intent()): AllowedIntent => authority.mint(i, decide(i));
+
+function setup(clockMs = { t: 1_000_000 }) {
+  const fake = createFakePayPal();
+  const adapter = new PayPalAdapter({
+    clientId: "test-id",
+    clientSecret: "test-secret",
+    authority,
+    baseUrl: "http://localhost:9999",
+    fetch: fake.fetch,
+    now: () => clockMs.t,
+  });
+  return { fake, adapter, clock: clockMs };
+}
+
+describe("formatAmount", () => {
+  test.each([
+    [0, "0.00"],
+    [5, "0.05"],
+    [4500, "45.00"],
+    [123456, "1234.56"],
+  ])("%i -> %s", (n, s) => expect(formatAmount(n, "USD")).toBe(s));
+  test("rejects floats, negatives and unsupported currencies", () => {
+    expect(() => formatAmount(1.5, "USD")).toThrow();
+    expect(() => formatAmount(-1, "USD")).toThrow();
+    expect(() => formatAmount(100, "JPY")).toThrow();
+  });
+});
+
+describe("Authority: no bypass path", () => {
+  test("refuses to mint for deny and require_approval decisions", () => {
+    const evil = intent({ payee: f("invoice", "Evil"), account: f("invoice", "evil@x.example") });
+    expect(decide(evil).verdict).toBe("deny");
+    expect(() => authority.mint(evil, decide(evil))).toThrow(UnauthorizedPaymentError);
+    const big = intent({ amount: f("user", 60000) });
+    expect(() => authority.mint(big, decide(big))).toThrow(/require_approval/);
+  });
+  test("refuses a decision that belongs to a different intent", () => {
+    const good = intent();
+    const other = intent({ amount: f("po", 99999) });
+    expect(() => authority.mint(other, decide(good))).toThrow(/does not match/);
+  });
+  test("a forged or tampered authorization is rejected before anything is sent", async () => {
+    const { adapter, fake } = setup();
+    const a = allowed();
+    const forged: AllowedIntent = { ...a, tag: "00".repeat(32) };
+    const tamperedAmount: AllowedIntent = { ...a, intent: { ...a.intent, amount: f("po", 999999) } };
+    const tamperedAccount: AllowedIntent = { ...a, intent: { ...a.intent, account: f("po", "evil@x.example") } };
+    const otherKey: AllowedIntent = new Authority("a-different-key-0123456789").mint(intent(), decide(intent()));
+    for (const bad of [forged, tamperedAmount, tamperedAccount, otherKey]) {
+      await expect(adapter.execute(bad)).rejects.toThrow(UnauthorizedPaymentError);
+    }
+    expect(fake.calls).toHaveLength(0);
+  });
+  test("a hand-built object with no tag is rejected", () => {
+    const { adapter } = setup();
+    expect(() => adapter.propose({ intent: intent(), decision: decide(intent()), authorizedBy: "policy" } as unknown as AllowedIntent)).toThrow(
+      UnauthorizedPaymentError,
+    );
+  });
+  test("short keys are rejected", () => expect(() => new Authority("short")).toThrow());
+});
+
+describe("PayPalAdapter", () => {
+  test("refuses non-sandbox hosts", () => {
+    expect(() => new PayPalAdapter({ clientId: "a", clientSecret: "b", authority, baseUrl: "https://api-m.paypal.com" })).toThrow(/non-sandbox/);
+  });
+
+  test("propose builds the payout request without touching the network", () => {
+    const { adapter, fake } = setup();
+    const p = adapter.propose(allowed());
+    expect(fake.calls).toHaveLength(0);
+    expect(p.request).toMatchObject({
+      items: [{ recipient_type: "EMAIL", receiver: "acme@sandbox.example", amount: { value: "45.00", currency: "USD" } }],
+    });
+    expect(p.requestId).toMatch(/^pfw-[0-9a-f]{32}$/);
+    expect(adapter.propose(allowed()).requestId).toBe(p.requestId);
+  });
+  test("a PayPal ID receiver uses PAYPAL_ID", () => {
+    const { adapter } = setup();
+    const i = intent({ account: f("vendor", "ABCDEFGHIJKLM") });
+    const st = { ...state(), vendors: [{ id: "acme", name: "Acme Supplies", account: "ABCDEFGHIJKLM", category: "office_supplies" }] };
+    const a = authority.mint(i, evaluate(i, POLICY, st));
+    expect(adapter.propose(a).request).toMatchObject({ items: [{ recipient_type: "PAYPAL_ID", receiver: "ABCDEFGHIJKLM" }] });
+  });
+
+  test("execute authenticates with Basic, then pays with Bearer and the request id", async () => {
+    const { adapter, fake } = setup();
+    const r = await adapter.execute(allowed());
+    const [token, pay] = fake.calls;
+    expect(token?.headers.Authorization).toMatch(/^Basic /);
+    expect(pay?.headers.Authorization).toBe("Bearer tok-2");
+    expect(pay?.headers["PayPal-Request-Id"]).toMatch(/^pfw-/);
+    expect(r).toMatchObject({ provider: "paypal", reference: "FAKEBATCH0001", status: "pending", amount: 4500, currency: "USD" });
+  });
+  test("the access token is reused until it nears expiry", async () => {
+    const { adapter, fake, clock } = setup();
+    await adapter.execute(allowed(intent({ idempotencyKey: "a" })));
+    await adapter.execute(allowed(intent({ idempotencyKey: "b" })));
+    expect(fake.calls.filter((c) => c.path === "/v1/oauth2/token")).toHaveLength(1);
+    clock.t += 32_400_000;
+    await adapter.execute(allowed(intent({ idempotencyKey: "c" })));
+    expect(fake.calls.filter((c) => c.path === "/v1/oauth2/token")).toHaveLength(2);
+  });
+  test("an expired token is refreshed once and the call retried", async () => {
+    const { adapter, fake } = setup();
+    await adapter.execute(allowed(intent({ idempotencyKey: "a" })));
+    fake.expireToken();
+    const r = await adapter.execute(allowed(intent({ idempotencyKey: "b" })));
+    expect(r.reference).toBe("FAKEBATCH0002");
+  });
+
+  test("a timeout is retryable and the retry reuses the same request id: one payout only", async () => {
+    const { adapter, fake } = setup();
+    fake.failNext("timeout");
+    const a = allowed();
+    await expect(adapter.execute(a)).rejects.toMatchObject({ retryable: true });
+    const r = await adapter.execute(a);
+    const posts = fake.payoutPosts();
+    expect(new Set(posts.map((p) => p.headers["PayPal-Request-Id"])).size).toBe(1);
+    expect(r.reference).toBe("FAKEBATCH0001");
+  });
+  test("a repeated request id returns the same batch", async () => {
+    const { adapter } = setup();
+    const a = allowed();
+    expect((await adapter.execute(a)).reference).toBe((await adapter.execute(a)).reference);
+  });
+  test("5xx is retryable, 4xx is not", async () => {
+    const { adapter, fake } = setup();
+    fake.failNext(500);
+    await expect(adapter.execute(allowed())).rejects.toMatchObject({ retryable: true, httpStatus: 500 });
+    fake.failNext(400);
+    const err = await adapter.execute(allowed()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AdapterError);
+    expect(err).toMatchObject({ retryable: false, httpStatus: 400 });
+  });
+  test("bad client credentials fail without retry loops", async () => {
+    const fake = createFakePayPal();
+    const adapter = new PayPalAdapter({ clientId: "x", clientSecret: "y", authority, baseUrl: "http://localhost:9999", fetch: fake.fetch });
+    await expect(adapter.execute(allowed())).rejects.toMatchObject({ retryable: false, httpStatus: 401 });
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  test("status maps PayPal transaction states", async () => {
+    const { adapter, fake } = setup();
+    const r = await adapter.execute(allowed());
+    expect(await adapter.status(r.reference)).toBe("pending");
+    fake.setBatchStatus(r.reference, "SUCCESS");
+    expect(await adapter.status(r.reference)).toBe("success");
+    fake.setBatchStatus(r.reference, "UNCLAIMED");
+    expect(await adapter.status(r.reference)).toBe("unclaimed");
+    await expect(adapter.status("nope")).rejects.toMatchObject({ httpStatus: 404 });
+  });
+});

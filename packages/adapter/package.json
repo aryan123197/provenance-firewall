@@ -5,6 +5,11 @@
   "license": "MIT",
   "type": "module",
   "description": "PaymentAdapter interface and the PayPal sandbox implementation",
-  "exports": { ".": "./src/index.ts" },
-  "dependencies": { "@pfw/core": "workspace:*" }
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/fake-paypal.ts"
+  },
+  "dependencies": {
+    "@pfw/core": "workspace:*"
+  }
 }
