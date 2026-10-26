@@ -22,6 +22,8 @@ beforeEach(() => {
     authorityKey: "test-authority-key-0123456789",
     openOperator: true,
     llmDailyCalls: 300,
+    rateLimitPerMinute: 0,
+    trustProxy: false,
     demo: true,
   });
 });

@@ -180,6 +180,7 @@ function DemoRunner({ open, onRan, llm }: { open: (to: string) => void; onRan: (
       {current && <p className="muted">{current.description} <em>User asked: “{current.request}”</em></p>}
       {err && <ErrorNote message={err} />}
       {run && <RunResult run={run} open={open} />}
+      <DriftDemo onDone={onRan} />
     </Card>
   );
 }
@@ -233,6 +234,29 @@ function RunResult({ run, open }: { run: DemoRun; open: (to: string) => void }) 
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Reconciliation without a live PayPal: have the (simulated) provider report something that does not match our records. */
+function DriftDemo({ onDone }: { onDone: () => void }) {
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | undefined>();
+  const go = async (kind: "unauthorized" | "mismatch") => {
+    setMsg(undefined);
+    try {
+      await api.simulateDrift(kind);
+      setMsg({ ok: true, text: "Reported. A drift banner now shows at the top of every screen." });
+      onDone();
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    }
+  };
+  return (
+    <div className="drift-demo">
+      <span className="muted small">Reconciliation demo:</span>
+      <button className="btn subtle" onClick={() => go("unauthorized")}>PayPal reports a payment we never authorized</button>
+      <button className="btn subtle" onClick={() => go("mismatch")}>PayPal reports a different amount for a payment we made</button>
+      {msg && <span className={`small ${msg.ok ? "ok-text" : "bad-text"}`} role="status">{msg.text}</span>}
     </div>
   );
 }

@@ -31,6 +31,10 @@ export interface ServerConfig {
   demo: boolean;
   /** JSON file of `{ vendors, purchaseOrders }`. The registry is operator-maintained, never agent-writable. */
   registryPath?: string;
+  /** Requests per minute per client IP, across the API. 0 turns it off. */
+  rateLimitPerMinute: number;
+  /** Trust X-Forwarded-For, which a host like Render sets. Needed for the per-IP limit to see real clients. */
+  trustProxy: boolean;
   /** Most Claude API calls per UTC day, across the policy compiler and the live agent. */
   llmDailyCalls: number;
   /** A live Claude client for the demo agent and the policy compiler. Defaults to one built from the environment, if any. */
@@ -58,6 +62,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     ...(env.AUDIT_SIGNING_KEY ? { auditKey: env.AUDIT_SIGNING_KEY } : {}),
     ...(env.OPERATOR_TOKEN ? { operatorToken: env.OPERATOR_TOKEN } : {}),
     llmDailyCalls: Number(env.LLM_DAILY_CALLS ?? 300),
+    rateLimitPerMinute: Number(env.RATE_LIMIT_PER_MIN ?? 240),
+    trustProxy: env.TRUST_PROXY === "1",
     openOperator: env.OPEN_OPERATOR === "1",
     demo,
     ...(env.REGISTRY_PATH ? { registryPath: env.REGISTRY_PATH } : {}),
@@ -107,7 +113,9 @@ export function buildServer(cfg: ServerConfig): Server {
       const fake = createFakePayPal();
       const sim = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: fake.fetch, webhookId: "WH-TEST" });
       adapter = sim;
-      webhooks = sim;
+      // No webhook verifier here on purpose: the simulation's signature check accepts a fixed value, so wiring it in would let
+      // anyone on the internet forge PayPal events against a public demo. Reconciliation is shown through the guarded
+      // /api/demo/simulate-drift route instead.
     }
     const policyNow = () => store.activePolicy() ?? filePolicy;
     return { store, policy: policyNow, firewall: new Firewall({ store, adapter, authority, policy: policyNow, ...(webhooks ? { webhooks } : {}) }) };
@@ -126,6 +134,8 @@ export function buildServer(cfg: ServerConfig): Server {
     policyYaml,
     ...(compiler ? { compiler } : {}),
     llmAgent: Boolean(llmAgent),
+    rateLimitPerMinute: cfg.rateLimitPerMinute,
+    trustProxy: cfg.trustProxy,
     mode,
     demo: cfg.demo,
     ...(cfg.operatorToken ? { operatorToken: cfg.operatorToken } : {}),

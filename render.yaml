@@ -14,6 +14,8 @@ services:
         value: "1"
       - key: OPEN_OPERATOR        # anyone can use the approve/reject buttons; only safe because money is simulated or sandbox
         value: "1"
+      - key: TRUST_PROXY          # Render forwards the client address, which the per-IP rate limit needs
+        value: "1"
       - key: DATABASE_PATH
         value: /tmp/pfw.db
       - key: AUTHORITY_KEY
