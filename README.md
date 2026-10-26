@@ -49,7 +49,7 @@ The agent proposes, the firewall decides, and only an allowed intent (or one a p
 
 ## Where PayPal and the LLM are used
 
-- **PayPal:** the adapter (`packages/adapter`) calls the **Payouts** API (create payout with `PayPal-Request-Id`, read status), OAuth client credentials, and the **webhook signature verification** endpoint. Webhook events (`PAYMENT.PAYOUTSBATCH.*`, `PAYMENT.PAYOUTS-ITEM.*`) feed reconciliation. Invoices are the attack surface: the red-team scenarios put injected text in invoice fields. Orders/Checkout is not implemented.
+- **PayPal:** the adapter (`packages/adapter`) calls the **Payouts** API (create payout with `PayPal-Request-Id`, read status), OAuth client credentials, and the **webhook signature verification** endpoint. Webhook events (`PAYMENT.PAYOUTSBATCH.*`, `PAYMENT.PAYOUTS-ITEM.*`) feed reconciliation. Invoices are the attack surface: the red-team scenarios put injected text in invoice fields. Orders/Checkout is not implemented; [docs/ORDERS_DESIGN.md](docs/ORDERS_DESIGN.md) explains why and how it would fit.
 - **LLM (Claude):** `packages/llm` has a procurement agent that reads invoices and proposes payments through the firewall, and a compiler that turns a plain-English policy into a patch of tunable thresholds. Both need `ANTHROPIC_API_KEY`. **The LLM never decides whether money moves**: the decision function is pure code, the agent's `pay` goes through it, and a compiled policy activates only after tests pass and a person confirms. The committed benchmark uses a scripted stand-in agent; see the status section.
 
 ## Status: what is real and what is simulated
