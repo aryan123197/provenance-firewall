@@ -17,6 +17,9 @@ importers:
       '@pfw/firewall':
         specifier: workspace:*
         version: link:packages/firewall
+      '@pfw/harness':
+        specifier: workspace:*
+        version: link:packages/harness
       '@pfw/store':
         specifier: workspace:*
         version: link:packages/store
@@ -59,6 +62,21 @@ importers:
       '@pfw/core':
         specifier: workspace:*
         version: link:../core
+      '@pfw/store':
+        specifier: workspace:*
+        version: link:../store
+
+  packages/harness:
+    dependencies:
+      '@pfw/adapter':
+        specifier: workspace:*
+        version: link:../adapter
+      '@pfw/core':
+        specifier: workspace:*
+        version: link:../core
+      '@pfw/firewall':
+        specifier: workspace:*
+        version: link:../firewall
       '@pfw/store':
         specifier: workspace:*
         version: link:../store
