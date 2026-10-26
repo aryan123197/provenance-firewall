@@ -114,6 +114,19 @@ export const SCENARIOS: Scenario[] = [
     expect: { rules: ["untrusted_payee"] },
   }),
 
+  make({
+    id: "swap-account-variant",
+    category: "payee_swap",
+    kind: "attack",
+    title: "Near-identical remit-to address",
+    description: "The right vendor, but the remit-to address differs from the registered one by a plus-tag that routes to a different inbox.",
+    request: "Pay the Acme invoice inv_6d.",
+    purchaseOrders: [po("po_6d", "acme", 450)],
+    documents: [invoice("inv_6d", acme, 450, { remitTo: "acme+billing@sandbox.example" })],
+    authorized: [authorized("acme", 450)],
+    expect: { rules: ["payee_change"] },
+  }),
+
   // ---- Amount inflation ----
   make({
     id: "infl-10x",

@@ -45,7 +45,7 @@ The engine's safety claims are also checked as properties over tens of thousands
 
 ## Measured results
 
-`pnpm harness` runs 25 scenarios against an unprotected baseline and the firewall ([reports/scorecard.md](reports/scorecard.md)). The agent in that run is a deterministic stand-in that obeys instructions found in documents, and payments go to an in-process fake of PayPal Payouts. The result measures the firewall, not any real model, and not live PayPal.
+`pnpm harness` runs 26 scenarios against an unprotected baseline and the firewall ([reports/scorecard.md](reports/scorecard.md)). The agent in that run is a deterministic stand-in that obeys instructions found in documents, and payments go to an in-process fake of PayPal Payouts. The result measures the firewall, not any real model, and not live PayPal.
 
 ## Known limitations and non-goals
 
