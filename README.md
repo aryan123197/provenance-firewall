@@ -33,7 +33,7 @@ agent ──proposes (handles)──▶ firewall ──allow / needs approval / 
 ## Where PayPal and the LLM are used
 
 - **PayPal:** the adapter (`packages/adapter`) calls the **Payouts** API (create payout with `PayPal-Request-Id`, read status), OAuth client credentials, and the **webhook signature verification** endpoint. Webhook events (`PAYMENT.PAYOUTSBATCH.*`, `PAYMENT.PAYOUTS-ITEM.*`) feed reconciliation. Invoices are the attack surface: the red-team scenarios put injected text in invoice fields. Orders/Checkout is not implemented.
-- **LLM:** drives the procurement agent that reads invoices and proposes payments, and (when enabled) compiles plain-English policies into rules. **The LLM never decides whether money moves.** In this repository's committed benchmark the agent is a scripted stand-in; see the status section.
+- **LLM (Claude):** `packages/llm` has a procurement agent that reads invoices and proposes payments through the firewall, and a compiler that turns a plain-English policy into a patch of tunable thresholds. Both need `ANTHROPIC_API_KEY`. **The LLM never decides whether money moves**: the decision function is pure code, the agent's `pay` goes through it, and a compiled policy activates only after tests pass and a person confirms. The committed benchmark uses a scripted stand-in agent; see the status section.
 
 ## Status: what is real and what is simulated
 
@@ -43,8 +43,8 @@ agent ──proposes (handles)──▶ firewall ──allow / needs approval / 
 | PayPal Payouts adapter | Implemented against PayPal's documented API and tested against an in-process fake. **It has not yet been run against the live PayPal sandbox.** |
 | Red-team harness and scorecard | Runs offline. Agent is a deterministic stand-in; payments are an in-process fake. |
 | Dashboard (activity, decision replay, approvals, policy and scorecard) | Implemented |
-| Plain-English policy authoring | Not yet |
-| LLM-driven agent | Not yet |
+| Plain-English policy authoring (compile, diff, generated tests, confirm, versioned in the audit log) | Implemented and tested with a fake model. **Not yet run against the live Claude API.** |
+| Claude-driven procurement agent (`pnpm harness:llm`, and the demo toggle) | Implemented and tested with a fake model. **Not yet run against the live Claude API, so there are no published numbers for a real model.** |
 
 Without PayPal credentials the server runs in **simulated** mode and the dashboard says so. With `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` set it talks to the PayPal **sandbox** (non-sandbox hosts are refused in code).
 
@@ -58,8 +58,13 @@ pnpm check                 # typecheck + all tests
 pnpm harness               # regenerate reports/scorecard.{md,json} (deterministic)
 pnpm build                 # build the dashboard
 pnpm dev:demo              # http://localhost:3000, simulated PayPal, demo scenarios, open approvals
+pnpm harness:llm           # same scenarios with a real Claude agent (needs ANTHROPIC_API_KEY; paid API calls)
 pnpm e2e                   # scripted payment (attack step runs offline; payout step needs sandbox credentials)
 ```
+
+### Plain-English policies
+
+With `ANTHROPIC_API_KEY` set, **Policy & scorecard** lets an operator write something like *"Contractors under $500 are fine, never pay new vendors on weekends, anything over $2k needs my approval."* The model returns a patch over the active policy (only tunable thresholds; clauses no rule can express are listed and must be acknowledged, not guessed). The server then shows a diff marked looser or stricter, lint warnings, and about 25 generated tests: boundary cases around every threshold and cap with expectations worked out by arithmetic, the examples the model wrote for its own reading of your sentence, and the built-in provenance rules. The confirm button stays disabled until every test passes and you name yourself; activation creates a new policy version and records who confirmed it, the original English and the patch in the signed audit log.
 
 In the demo, open **Live activity**, pick a scenario under *Try an attack* and run it: the unprotected agent (simulated PayPal) pays the attacker while the same agent behind the live firewall is denied. Click the row to see the decision replay, or open **Approvals** to approve a held payment.
 
@@ -83,6 +88,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | `POLICY_PATH` | `policies/default.policy.yaml` | Active policy |
 | `REGISTRY_PATH` | none | JSON `{ vendors, purchaseOrders }`, the operator-maintained registry |
 | `OPERATOR_TOKEN` | none | Bearer token required to approve or reject |
+| `ANTHROPIC_API_KEY` | none | Enables the policy compiler and the live Claude agent. `PFW_MODEL` overrides the model (default `claude-opus-5-5`). |
 | `OPEN_OPERATOR` | off | `1` lets anyone approve or reject. Public demos on simulated or sandbox money only. |
 | `DEMO_MODE` | off | `1` seeds demo vendors and mounts the scenario runner |
 | `AUTHORITY_KEY` | random per process | Shared secret between firewall and adapter |
@@ -102,6 +108,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | `packages/firewall` | Service that wires the above; the only path to PayPal |
 | `packages/server` | HTTP API, webhook endpoint, demo runner |
 | `packages/dashboard` | React + AG Grid operator dashboard |
+| `packages/llm` | Claude-backed procurement agent and plain-English policy compiler |
 | `packages/harness` | 24 attack and legitimate scenarios, baseline vs firewalled runner, scorecard |
 | `policies/` | Versioned policy files |
 | `reports/` | Committed scorecard (a test fails if it is stale) |

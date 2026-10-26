@@ -39,6 +39,7 @@ A payee, account or amount that originated in untrusted content can never author
 | 12 | **Money moved outside the firewall** (stolen credentials, a bug) | Reconciliation compares PayPal's reports with authorized decisions and opens a drift record, shown as a banner, for payments we never authorized or that differ in amount, currency or receiver. | `store.recordProviderEvent` | `firewall.test.ts` |
 | 13 | **Tampering with history** | The audit log is append-only in SQL and hash-chained with an Ed25519 signature per entry. Edits, insertions and mid-log deletions fail verification, even if the SQL triggers are dropped. | `store/audit` | `audit.test.ts` |
 | 14 | **Policy edits that weaken security** | The policy schema has no setting for the provenance rules, so no policy can loosen them. Unknown keys are rejected. | `core/policy` | `engine.test.ts` |
+| 15 | **A bad or manipulated plain-English policy** (misread units, injected instructions in the text, a clause quietly dropped) | The compiler returns only a patch validated against a strict schema, so there is nothing to carry a provenance setting. Unsupported clauses are listed and must be acknowledged. The server recomputes the diff, lint warnings and tests itself and refuses activation if any test fails, including the author's own examples, which catch slips such as dollars compiled as cents. Activation needs the operator token, a named confirmer and the current base version, and records the English, the patch and who confirmed in the audit log. | `core/policy-edit`, `core/policy-tests`, `server` | `policy-edit.test.ts`, `policy.test.ts` (server), `llm.test.ts` |
 
 The engine's safety claims are also checked as properties over tens of thousands of random intents (`engine.property.test.ts`), stated independently of the rule code: allow implies an exact registry match; a payee swap is always denied with an alert; an untrusted amount is allowed only against a matching order; every limit holds on allow; lowering trust never improves a verdict.
 
@@ -57,7 +58,8 @@ The engine's safety claims are also checked as properties over tens of thousands
 - **Authentication.** Operator actions use one bearer token. There is no user directory, so the approver name is self-reported. `OPEN_OPERATOR=1` removes the token and is for public demos on simulated or sandbox money only.
 - **Provenance depends on the harness.** The guarantee holds only if every tool result is labelled by the harness and the agent passes handles. An integration that lets raw strings through is still safe (they are untrusted) but will be blocked more often.
 - **Non-USD currencies, multi-item payouts and refunds** are not supported.
-- **LLM-authored policies** (when enabled) are a new way to make a mistake. They are validated against the schema, cannot loosen provenance rules, come with generated tests that must pass, are shown as a diff, and activate only after a person confirms.
+- **LLM-authored policies** are a new way to make a mistake. The tests and diff catch inconsistency and unit slips, but not a reviewer who confirms without reading, and a policy that is internally consistent yet wrong for the business passes every test. The generated tests check that the compiled numbers behave as the engine should, not that they are what the operator should have wanted.
+- **The live Claude agent and compiler have not been run against the live API.** They are tested against a fake client that checks request shape and handling of refusals, truncation and malformed output.
 
 ## Out of scope
 
