@@ -27,20 +27,20 @@ export interface Policy extends PolicyDoc {
   hash: string;
 }
 
-function canonical(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
+export function canonicalJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
   if (v && typeof v === "object") {
     const o = v as Record<string, unknown>;
     return `{${Object.keys(o)
       .sort()
-      .map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`)
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`)
       .join(",")}}`;
   }
   return JSON.stringify(v);
 }
 
 export function hashPolicy(doc: PolicyDoc): string {
-  return createHash("sha256").update(canonical(doc)).digest("hex");
+  return createHash("sha256").update(canonicalJson(doc)).digest("hex");
 }
 
 /** Parses and validates policy YAML text. Throws with readable messages on invalid input. */

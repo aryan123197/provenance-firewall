@@ -1,1 +1,1 @@
-export const PACKAGE = "@pfw/store";
+export { Store, IdempotencyConflictError, type DecideResult, type StoreOptions } from "./store";
