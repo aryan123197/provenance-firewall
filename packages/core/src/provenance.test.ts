@@ -41,6 +41,48 @@ describe("handles", () => {
   });
 });
 
+describe("resolveIntent bounds what an agent can send", () => {
+  const ctx = new ProvenanceContext();
+  ctx.register("vendor:acme#name", "Acme Supplies");
+  const ok = {
+    agentId: "agent-1",
+    idempotencyKey: "k1",
+    payee: { handle: "vendor:acme#name" },
+    account: { literal: "acme@sandbox.example" },
+    amount: { literal: 4500 },
+    currency: { literal: "USD" },
+    category: { literal: "office_supplies" },
+  };
+  const bad = (o: Record<string, unknown>) => resolveIntent({ ...ok, ...o }, ctx);
+
+  test("a well-formed intent still resolves", () => expect(resolveIntent(ok, ctx).ok).toBe(true));
+  test.each([
+    ["idempotency key", { idempotencyKey: "k".repeat(201) }],
+    ["agent id", { agentId: "a".repeat(101) }],
+    ["handle", { payee: { handle: `vendor:${"a".repeat(250)}` } }],
+    ["payee", { payee: { literal: "P".repeat(201) } }],
+    ["account", { account: { literal: `${"a".repeat(250)}@x.example` } }],
+    ["category", { category: { literal: "c".repeat(65) } }],
+    ["literal", { payee: { literal: "x".repeat(1001) } }],
+  ])("an oversized %s is rejected", (_n, o) => expect(bad(o).ok).toBe(false));
+  test("the limit itself is accepted", () => {
+    expect(bad({ idempotencyKey: "k".repeat(200), agentId: "a".repeat(100) }).ok).toBe(true);
+  });
+  test.each([["newline", "Acme\nSupplies"], ["NUL", "Acme\u0000"], ["tab", "Acme\tCo"], ["DEL", "Acme\u007f"]])("a %s in a name is rejected", (_n, v) => {
+    expect(bad({ payee: { literal: v } }).ok).toBe(false);
+    expect(bad({ account: { literal: v } }).ok).toBe(false);
+    expect(bad({ idempotencyKey: v }).ok).toBe(false);
+    expect(bad({ category: { literal: v } }).ok).toBe(false);
+  });
+  test("objects, arrays, null and booleans are never a literal", () => {
+    for (const lit of [{ a: 1 }, [1, 2], null, true]) expect(bad({ payee: { literal: lit } }).ok, JSON.stringify(lit)).toBe(false);
+  });
+  test("ordinary punctuation and non-English names are fine", () => {
+    expect(bad({ payee: { literal: "Müller & Söhne GmbH (Zürich) — Büro" } }).ok).toBe(true);
+    expect(bad({ payee: { literal: "株式会社 山田商店" } }).ok).toBe(true);
+  });
+});
+
 describe("resolveIntent", () => {
   const ctx = new ProvenanceContext();
   ctx.register("vendor:acme#name", "Acme Supplies");

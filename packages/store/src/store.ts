@@ -283,6 +283,7 @@ export class Store {
   changeVendor(v: VendorRecord, changedBy: string): VendorChange {
     return this.db.transaction((): VendorChange => {
       if (!changedBy.trim()) throw new RegistryError("say who is making this change");
+      if (changedBy.length > 200) throw new RegistryError("the name is too long (200 characters at most)");
       if (!VENDOR_ID.test(v.id)) throw new RegistryError("the vendor id must be 2-41 characters: lowercase letters, digits, - or _");
       if (!v.name.trim() || v.name.length > 120 || v.name !== v.name.trim()) throw new RegistryError("the vendor name must be 1-120 characters with no leading or trailing spaces");
       if (!ACCOUNT.test(v.account) || v.account.length > 254) throw new RegistryError("the account must be a PayPal email address or a 13-character PayPal ID");
@@ -301,6 +302,7 @@ export class Store {
   changePurchaseOrder(po: PurchaseOrder, changedBy: string): void {
     this.db.transaction(() => {
       if (!changedBy.trim()) throw new RegistryError("say who is making this change");
+      if (changedBy.length > 200) throw new RegistryError("the name is too long (200 characters at most)");
       if (!VENDOR_ID.test(po.id)) throw new RegistryError("the purchase order id must be 2-41 characters: lowercase letters, digits, - or _");
       if (!this.db.prepare("SELECT 1 FROM vendors WHERE id = ?").get(po.vendorId)) throw new RegistryError(`unknown vendor ${po.vendorId}`);
       if (!Number.isSafeInteger(po.amount) || po.amount < 0) throw new RegistryError("the amount must be a non-negative whole number of cents");
@@ -449,6 +451,8 @@ export class Store {
       }
       if (input.doc.version !== currentVersion + 1) throw new PolicyConflictError(`the new policy must be version ${currentVersion + 1}`);
       if (!input.confirmedBy.trim()) throw new PolicyConflictError("who confirmed this change is required");
+      if (input.confirmedBy.length > 200) throw new PolicyConflictError("the confirmer's name is too long (200 characters at most)");
+      if ((input.sourceText?.length ?? 0) > 4000) throw new PolicyConflictError("the policy text is too long (4,000 characters at most)");
       const policy = policyFromDoc(input.doc);
       const at = this.clock().toISOString();
       this.db.prepare("UPDATE policy_versions SET active = 0 WHERE active = 1").run();
@@ -495,6 +499,8 @@ export class Store {
       if (!a) throw new ApprovalStateError(`unknown approval ${id}`);
       if (a.status !== "pending") throw new ApprovalStateError(`approval ${id} is already ${a.status}`);
       if (!input.approver.trim()) throw new ApprovalStateError("an approver is required");
+      if (input.approver.length > 200) throw new ApprovalStateError("the approver name is too long (200 characters at most)");
+      if ((input.note?.length ?? 0) > 1000) throw new ApprovalStateError("the note is too long (1,000 characters at most)");
       if (input.approver === a.intent.agentId) throw new ApprovalStateError("an agent cannot approve its own payment");
 
       const now = this.clock();

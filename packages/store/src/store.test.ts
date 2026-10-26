@@ -269,6 +269,29 @@ describe("policy versions", () => {
   });
 });
 
+describe("operator-supplied text is bounded before it enters the append-only log", () => {
+  test("approver, note, confirmer, policy text and registry author have limits, and a refusal writes nothing", () => {
+    const before = store.audit.entries().length;
+    const big = (n: number) => "x".repeat(n);
+    store.decide(intent({ idempotencyKey: "held", amount: f("user", 60000) }), policy);
+    const id = store.listApprovals("pending")[0]!.id;
+    expect(() => store.resolveApproval(id, { approver: big(201), approve: true }, policy)).toThrow(/too long/);
+    expect(() => store.resolveApproval(id, { approver: "dana", approve: true, note: big(1001) }, policy)).toThrow(/too long/);
+    expect(() => store.activatePolicy({ baseVersion: 1, doc: applyPatch(policy, { approvalThreshold: 1 }), confirmedBy: big(201) })).toThrow(/too long/);
+    expect(() => store.activatePolicy({ baseVersion: 1, doc: applyPatch(policy, { approvalThreshold: 1 }), confirmedBy: "dana", sourceText: big(4001) })).toThrow(/too long/);
+    expect(() => store.changeVendor({ id: "newco", name: "New Co", account: "n@x.example", category: "software" }, big(201))).toThrow(/too long/);
+    expect(() => store.changePurchaseOrder({ id: "po-x", vendorId: "acme", amount: 1, currency: "USD" }, big(201))).toThrow(/too long/);
+    expect(store.listApprovals("pending")).toHaveLength(1); // the approval is untouched and still pending
+    expect(store.audit.entries().length).toBe(before + 2); // only the held decision and its approval request
+    expect(store.audit.verify().ok).toBe(true);
+  });
+  test("the limits themselves are accepted", () => {
+    store.decide(intent({ idempotencyKey: "held2", amount: f("user", 60000) }), policy);
+    const id = store.listApprovals("pending")[0]!.id;
+    expect(store.resolveApproval(id, { approver: "d".repeat(200), approve: false, note: "n".repeat(1000) }, policy)).toMatchObject({ ok: true });
+  });
+});
+
 describe("operator registry changes", () => {
   const acme2 = { id: "acme", name: "Acme Supplies", account: "billing@acme.example", category: "office_supplies" };
 
