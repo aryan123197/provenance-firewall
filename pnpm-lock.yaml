@@ -157,12 +157,18 @@ importers:
       '@pfw/harness':
         specifier: workspace:*
         version: link:../harness
+      '@pfw/llm':
+        specifier: workspace:*
+        version: link:../llm
       '@pfw/store':
         specifier: workspace:*
         version: link:../store
       fastify:
         specifier: ^5.12.7
         version: 5.12.7
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
   packages/store:
     dependencies:

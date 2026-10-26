@@ -13,8 +13,10 @@
     "@pfw/adapter": "workspace:*",
     "@pfw/core": "workspace:*",
     "@pfw/firewall": "workspace:*",
+    "@pfw/harness": "workspace:*",
+    "@pfw/llm": "workspace:*",
     "@pfw/store": "workspace:*",
     "fastify": "^5.12.7",
-    "@pfw/harness": "workspace:*"
+    "zod": "^4.6.7"
   }
 }

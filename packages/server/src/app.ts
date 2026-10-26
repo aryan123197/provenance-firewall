@@ -2,20 +2,39 @@ import { existsSync } from "node:fs";
 import { timingSafeEqual } from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
-import type { Policy } from "@pfw/core";
+import {
+  PolicyPatchSchema,
+  applyPatch,
+  diffPolicy,
+  lintPolicy,
+  runIntentExamples,
+  runPolicyTests,
+  type IntentExample,
+  type Policy,
+  type PolicyDoc,
+  type PolicyTestResult,
+  type UnsupportedClause,
+} from "@pfw/core";
 import type { Firewall } from "@pfw/firewall";
-import { ApprovalStateError, type Store } from "@pfw/store";
+import { ApprovalStateError, PolicyConflictError, type Store } from "@pfw/store";
+import { LlmRefusalError, type PolicyCompiler } from "@pfw/llm";
+import { z } from "zod";
 
 /** The live pieces. A getter is used so a demo reset can swap in a fresh database. */
 export interface Runtime {
   store: Store;
   firewall: Firewall;
+  /** The active policy: the newest activated version, else the deployment's policy file. */
+  policy: () => Policy;
 }
 
 export interface AppDeps {
   runtime: () => Runtime;
-  policy: Policy;
   policyYaml: string;
+  /** Compiles plain-English policies. Absent without an API key, and the endpoint says so. */
+  compiler?: PolicyCompiler;
+  /** Whether a live Claude agent can drive the demo runner. */
+  llmAgent?: boolean;
   /** "sandbox" talks to the PayPal sandbox; "simulated" uses an in-process fake. The dashboard shows which. */
   mode: "sandbox" | "simulated";
   /** Whether the demo scenario runner is mounted. The dashboard shows its controls only then. */
@@ -56,13 +75,16 @@ export function createApp(deps: AppDeps): FastifyInstance {
   };
 
   app.get("/api/status", async () => {
-    const { store } = deps.runtime();
+    const { store, policy: activePolicy } = deps.runtime();
+    const policy = activePolicy();
     const audit = store.audit.verify();
     return {
       mode: deps.mode,
       demo: Boolean(deps.demo),
       openOperator: Boolean(deps.openOperator),
-      policy: { name: deps.policy.name, version: deps.policy.version, hash: deps.policy.hash },
+      policy: { name: policy.name, version: policy.version, hash: policy.hash },
+      compilerAvailable: Boolean(deps.compiler),
+      llmAgentAvailable: Boolean(deps.llmAgent),
       audit: audit.ok ? { ok: true, count: audit.count, head: audit.head } : { ok: false, seq: audit.seq, reason: audit.reason },
       driftOpen: store.listDrift("open").length,
       pendingApprovals: store.listApprovals("pending").length,
@@ -104,10 +126,99 @@ export function createApp(deps: AppDeps): FastifyInstance {
 
   app.get("/api/drift", async () => ({ drift: deps.runtime().store.listDrift() }));
 
-  app.get("/api/policy", async () => ({
-    policy: { ...deps.policy },
-    yaml: deps.policyYaml,
-  }));
+  app.get("/api/policy", async () => {
+    const { store, policy } = deps.runtime();
+    return { policy: { ...policy() }, yaml: deps.policyYaml, versions: store.listPolicyVersions(), compilerAvailable: Boolean(deps.compiler) };
+  });
+
+  // ---- Plain-English policies: compile, review, confirm ----
+  const examplesSchema = z
+    .array(
+      z.object({
+        description: z.string().min(1),
+        amount: z.number().nonnegative(),
+        category: z.string().min(1),
+        newPayee: z.boolean().optional(),
+        weekday: z.number().int().min(0).max(6).optional(),
+        expect: z.enum(["allow", "require_approval", "deny"]),
+      }),
+    )
+    .transform((list): IntentExample[] =>
+      list.map((e) => ({
+        description: e.description,
+        amount: e.amount,
+        category: e.category,
+        ...(e.newPayee ? { newPayee: true } : {}),
+        ...(e.weekday !== undefined ? { weekday: e.weekday } : {}),
+        expect: e.expect,
+      })),
+    );
+
+  /** Everything the review screen shows, derived on the server from a patch so the client cannot misreport it. */
+  const review = (active: PolicyDoc, patch: unknown, examples: IntentExample[]) => {
+    const proposed = applyPatch(active, PolicyPatchSchema.parse(patch));
+    const tests: PolicyTestResult[] = [...runIntentExamples(proposed, examples), ...runPolicyTests(proposed)];
+    return {
+      proposed,
+      diff: diffPolicy(active, proposed),
+      lint: lintPolicy(proposed),
+      tests,
+      canActivate: tests.every((t) => t.passed),
+    };
+  };
+
+  app.post<{ Body: { english?: string } }>("/api/policy/compile", async (req, reply) => {
+    if (!deps.compiler) return reply.code(503).send({ error: "Plain-English policies need a Claude API key (ANTHROPIC_API_KEY) on the server." });
+    const english = req.body?.english;
+    if (typeof english !== "string" || !english.trim()) return reply.code(400).send({ error: "Write the policy you want first." });
+    const active = deps.runtime().policy();
+    try {
+      const out = await deps.compiler.compile(english, active);
+      return { baseVersion: active.version, english, summary: out.summary, patch: out.patch, unsupported: out.unsupported, examples: out.examples, ...review(active, out.patch, out.examples) };
+    } catch (e) {
+      if (e instanceof LlmRefusalError) return reply.code(422).send({ error: e.message });
+      if (e instanceof z.ZodError) return reply.code(422).send({ error: "The compiled policy was not valid, so it was discarded. Try rephrasing." });
+      return reply.code(502).send({ error: e instanceof Error ? e.message : "The compiler failed." });
+    }
+  });
+
+  app.post<{
+    Body: { baseVersion?: number; patch?: unknown; english?: string; unsupported?: UnsupportedClause[]; examples?: unknown; confirmedBy?: string; acknowledgeUnsupported?: boolean };
+  }>("/api/policy/activate", { preHandler: requireOperator }, async (req, reply) => {
+    const b = req.body ?? {};
+    const { store, policy } = deps.runtime();
+    const active = policy();
+    if (typeof b.confirmedBy !== "string" || !b.confirmedBy.trim()) return reply.code(400).send({ error: "Say who is confirming this change." });
+    if (typeof b.baseVersion !== "number") return reply.code(400).send({ error: "baseVersion is required." });
+    const unsupported = Array.isArray(b.unsupported) ? b.unsupported : [];
+    if (unsupported.length > 0 && b.acknowledgeUnsupported !== true) {
+      return reply.code(400).send({ error: "Some clauses could not be turned into rules. Acknowledge that they will not be enforced." });
+    }
+    let examples: IntentExample[];
+    let result: ReturnType<typeof review>;
+    try {
+      examples = examplesSchema.parse(b.examples ?? []);
+      result = review(active, b.patch ?? {}, examples);
+    } catch (e) {
+      return reply.code(400).send({ error: e instanceof Error ? `That change is not a valid policy: ${e.message}` : "invalid policy change" });
+    }
+    // Re-checked here, not trusted from the browser: nothing activates unless every test passes.
+    if (!result.canActivate) return reply.code(422).send({ error: "Some tests fail, so this policy cannot be activated.", failed: result.tests.filter((t) => !t.passed) });
+    try {
+      const next = store.activatePolicy({
+        baseVersion: b.baseVersion,
+        doc: result.proposed,
+        confirmedBy: b.confirmedBy,
+        ...(typeof b.english === "string" ? { sourceText: b.english } : {}),
+        patch: b.patch ?? {},
+        note: { unsupportedAcknowledged: unsupported, examples, testsPassed: result.tests.length, lint: result.lint },
+      });
+      return { ok: true, version: next.version, hash: next.hash };
+    } catch (e) {
+      if (e instanceof PolicyConflictError) return reply.code(409).send({ error: e.message });
+      throw e;
+    }
+  });
 
   app.get<{ Querystring: { after?: string; limit?: string } }>("/api/audit", async (req) => ({
     entries: deps.runtime().store.audit.entries({ after: Number(req.query.after ?? 0) || 0, limit: Math.min(Number(req.query.limit ?? 200) || 200, 1000) }),

@@ -9,6 +9,7 @@ import { createFakePayPal } from "@pfw/adapter/testing";
 import { Firewall } from "@pfw/firewall";
 import { createSigner, Store } from "@pfw/store";
 import { VENDORS, type Agent } from "@pfw/harness";
+import { AnthropicPolicyCompiler, LlmAgent, createClient, type MessagesClient, type PolicyCompiler } from "@pfw/llm";
 import { createApp, type Runtime } from "./app";
 import { registerDemo } from "./demo";
 
@@ -30,7 +31,11 @@ export interface ServerConfig {
   demo: boolean;
   /** JSON file of `{ vendors, purchaseOrders }`. The registry is operator-maintained, never agent-writable. */
   registryPath?: string;
-  agent?: Agent;
+  /** A live Claude client for the demo agent and the policy compiler. Defaults to one built from the environment, if any. */
+  llm?: MessagesClient | null;
+  /** Test seams. */
+  compiler?: PolicyCompiler;
+  llmAgent?: Agent;
 }
 
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -65,7 +70,7 @@ export interface Server {
 
 export function buildServer(cfg: ServerConfig): Server {
   const policyYaml = readFileSync(cfg.policyPath, "utf8");
-  const policy = loadPolicy(policyYaml);
+  const filePolicy = loadPolicy(policyYaml);
   const authority = new Authority(cfg.authorityKey);
   const mode = cfg.paypal ? "sandbox" : "simulated";
 
@@ -101,16 +106,22 @@ export function buildServer(cfg: ServerConfig): Server {
       adapter = sim;
       webhooks = sim;
     }
-    return { store, firewall: new Firewall({ store, adapter, authority, policy, ...(webhooks ? { webhooks } : {}) }) };
+    const policyNow = () => store.activePolicy() ?? filePolicy;
+    return { store, policy: policyNow, firewall: new Firewall({ store, adapter, authority, policy: policyNow, ...(webhooks ? { webhooks } : {}) }) };
   };
 
   let runtime = createRuntime();
   const readCard = () => (existsSync(cfg.scorecardPath) ? JSON.parse(readFileSync(cfg.scorecardPath, "utf8")) : undefined);
 
+  const llm = cfg.llm === undefined ? createClient() : cfg.llm;
+  const compiler = cfg.compiler ?? (llm ? new AnthropicPolicyCompiler(llm) : undefined);
+  const llmAgent = cfg.llmAgent ?? (llm ? new LlmAgent({ client: llm }) : undefined);
+
   const app = createApp({
     runtime: () => runtime,
-    policy,
     policyYaml,
+    ...(compiler ? { compiler } : {}),
+    llmAgent: Boolean(llmAgent),
     mode,
     demo: cfg.demo,
     ...(cfg.operatorToken ? { operatorToken: cfg.operatorToken } : {}),
@@ -121,8 +132,7 @@ export function buildServer(cfg: ServerConfig): Server {
       if (!cfg.demo) return;
       registerDemo(a, {
         runtime: () => runtime,
-        policy,
-        ...(cfg.agent ? { agent: cfg.agent } : {}),
+        ...(llmAgent ? { llmAgent } : {}),
         reset: () => {
           runtime.store.close();
           if (cfg.databasePath !== ":memory:") for (const suffix of ["", "-wal", "-shm"]) rmSync(cfg.databasePath + suffix, { force: true });
