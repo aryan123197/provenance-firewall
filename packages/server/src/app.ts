@@ -18,6 +18,8 @@ export interface AppDeps {
   policyYaml: string;
   /** "sandbox" talks to the PayPal sandbox; "simulated" uses an in-process fake. The dashboard shows which. */
   mode: "sandbox" | "simulated";
+  /** Whether the demo scenario runner is mounted. The dashboard shows its controls only then. */
+  demo?: boolean;
   /** Required as a Bearer token for operator actions unless `openOperator` is set. */
   operatorToken?: string;
   /** Lets anyone approve or reject. For public demos against simulated or sandbox money only. */
@@ -58,6 +60,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
     const audit = store.audit.verify();
     return {
       mode: deps.mode,
+      demo: Boolean(deps.demo),
       openOperator: Boolean(deps.openOperator),
       policy: { name: deps.policy.name, version: deps.policy.version, hash: deps.policy.hash },
       audit: audit.ok ? { ok: true, count: audit.count, head: audit.head } : { ok: false, seq: audit.seq, reason: audit.reason },
@@ -126,7 +129,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
   deps.extend?.(app);
 
   if (deps.staticDir && existsSync(deps.staticDir)) {
-    void app.register(fastifyStatic, { root: deps.staticDir, wildcard: false });
+    void app.register(fastifyStatic, { root: deps.staticDir });
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith("/api/")) return reply.code(404).send({ error: "not found" });
       return reply.sendFile("index.html");

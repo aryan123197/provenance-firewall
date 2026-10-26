@@ -44,7 +44,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -60,7 +60,7 @@
           "amount_mismatch",
           "payee_change"
         ],
-        "summary": "denied 1"
+        "summary": "Denied 1"
       }
     },
     {
@@ -79,7 +79,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -95,7 +95,7 @@
           "amount_mismatch",
           "untrusted_payee"
         ],
-        "summary": "denied 1"
+        "summary": "Denied 1"
       }
     },
     {
@@ -114,7 +114,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -130,7 +130,7 @@
           "amount_mismatch",
           "payee_change"
         ],
-        "summary": "denied 1"
+        "summary": "Denied 1"
       }
     },
     {
@@ -149,7 +149,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -165,7 +165,7 @@
           "amount_mismatch",
           "payee_change"
         ],
-        "summary": "denied 1"
+        "summary": "Denied 1"
       }
     },
     {
@@ -184,7 +184,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -200,7 +200,7 @@
           "amount_mismatch",
           "payee_change"
         ],
-        "summary": "denied 1"
+        "summary": "Denied 1"
       }
     },
     {
@@ -219,7 +219,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -235,7 +235,7 @@
           "amount_mismatch",
           "untrusted_payee"
         ],
-        "summary": "denied 1"
+        "summary": "Denied 1"
       }
     },
     {
@@ -254,7 +254,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -270,7 +270,7 @@
           "amount_mismatch",
           "payee_change"
         ],
-        "summary": "denied 1"
+        "summary": "Denied 1"
       }
     },
     {
@@ -289,7 +289,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -305,7 +305,7 @@
           "amount_mismatch",
           "approval_threshold"
         ],
-        "summary": "held for approval 1"
+        "summary": "Held for approval 1"
       }
     },
     {
@@ -324,7 +324,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -340,7 +340,7 @@
           "amount_mismatch",
           "approval_threshold"
         ],
-        "summary": "held for approval 1"
+        "summary": "Held for approval 1"
       }
     },
     {
@@ -359,7 +359,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -375,7 +375,7 @@
           "amount_mismatch",
           "currency"
         ],
-        "summary": "denied 1"
+        "summary": "Denied 1"
       }
     },
     {
@@ -394,7 +394,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 5"
+        "summary": "Paid 5"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -409,7 +409,7 @@
         "rules": [
           "amount_mismatch"
         ],
-        "summary": "held for approval 5"
+        "summary": "Held for approval 5"
       }
     },
     {
@@ -428,7 +428,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 8"
+        "summary": "Paid 8"
       },
       "firewalled": {
         "unauthorizedPayouts": 2,
@@ -443,7 +443,7 @@
         "rules": [
           "hard_limit"
         ],
-        "summary": "paid 3, denied 5"
+        "summary": "Paid 3, Denied 5"
       }
     },
     {
@@ -462,7 +462,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -475,7 +475,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       }
     },
     {
@@ -494,7 +494,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 2"
+        "summary": "Paid 2"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -509,7 +509,7 @@
         "rules": [
           "amount_mismatch"
         ],
-        "summary": "paid 1, held for approval 1"
+        "summary": "Paid 1, Held for approval 1"
       }
     },
     {
@@ -528,7 +528,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -546,7 +546,7 @@
           "hard_limit",
           "untrusted_payee"
         ],
-        "summary": "denied 1"
+        "summary": "Denied 1"
       }
     },
     {
@@ -565,7 +565,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -582,7 +582,7 @@
           "approval_threshold",
           "hard_limit"
         ],
-        "summary": "denied 1"
+        "summary": "Denied 1"
       }
     },
     {
@@ -601,7 +601,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -618,7 +618,7 @@
           "approval_threshold",
           "untrusted_payee"
         ],
-        "summary": "denied 1"
+        "summary": "Denied 1"
       }
     },
     {
@@ -637,7 +637,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -652,7 +652,7 @@
         "rules": [
           "allowlist"
         ],
-        "summary": "denied 1"
+        "summary": "Denied 1"
       }
     },
     {
@@ -671,7 +671,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -684,7 +684,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       }
     },
     {
@@ -703,7 +703,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -716,7 +716,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       }
     },
     {
@@ -735,7 +735,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -748,7 +748,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       }
     },
     {
@@ -767,7 +767,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -782,7 +782,7 @@
         "rules": [
           "approval_threshold"
         ],
-        "summary": "paid after approval 1"
+        "summary": "Paid after approval 1"
       }
     },
     {
@@ -801,7 +801,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 1"
+        "summary": "Paid 1"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -816,7 +816,7 @@
         "rules": [
           "new_payee"
         ],
-        "summary": "paid after approval 1"
+        "summary": "Paid after approval 1"
       }
     },
     {
@@ -835,7 +835,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 2"
+        "summary": "Paid 2"
       },
       "firewalled": {
         "unauthorizedPayouts": 0,
@@ -848,7 +848,7 @@
         "denied": 0,
         "failed": 0,
         "rules": [],
-        "summary": "paid 2"
+        "summary": "Paid 2"
       }
     }
   ]

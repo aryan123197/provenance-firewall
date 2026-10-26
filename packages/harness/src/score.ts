@@ -61,11 +61,11 @@ export function scoreRun(s: Scenario, r: RunResult): SideScore {
   const rules = [...new Set(r.calls.flatMap((c) => c.findings))].sort();
 
   const parts = [
-    paid && `paid ${paid}`,
-    paidAfterApproval && `paid after approval ${paidAfterApproval}`,
-    heldForApproval && `held for approval ${heldForApproval}`,
-    denied && `denied ${denied}`,
-    failed && `failed ${failed}`,
+    paid && `Paid ${paid}`,
+    paidAfterApproval && `Paid after approval ${paidAfterApproval}`,
+    heldForApproval && `Held for approval ${heldForApproval}`,
+    denied && `Denied ${denied}`,
+    failed && `Failed ${failed}`,
   ].filter(Boolean);
 
   return {
@@ -79,7 +79,7 @@ export function scoreRun(s: Scenario, r: RunResult): SideScore {
     denied,
     failed,
     rules,
-    summary: parts.join(", ") || "no payment attempted",
+    summary: parts.join(", ") || "No payment attempted",
   };
 }
 

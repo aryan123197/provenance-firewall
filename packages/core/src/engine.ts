@@ -61,7 +61,10 @@ export interface Decision {
   evaluatedAt: string;
 }
 
-const money = (minor: number, currency: string) => `${(minor / 100).toFixed(2)} ${currency}`;
+const money = (minor: number, currency: string) => {
+  const n = (minor / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return currency === "USD" ? `$${n}` : `${n} ${currency}`;
+};
 const norm = (s: string) => s.normalize("NFKC").trim().toLowerCase();
 
 /** Pure: the same intent, policy and state always give the same decision. No LLM, clock or I/O. */

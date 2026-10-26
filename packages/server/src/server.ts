@@ -112,6 +112,7 @@ export function buildServer(cfg: ServerConfig): Server {
     policy,
     policyYaml,
     mode,
+    demo: cfg.demo,
     ...(cfg.operatorToken ? { operatorToken: cfg.operatorToken } : {}),
     openOperator: cfg.openOperator,
     scorecard: readCard,
