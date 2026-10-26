@@ -41,3 +41,5 @@ const required = lines.filter((l) => l.hint !== "optional");
 const failed = required.filter((l) => !l.ok).length;
 console.log(failed ? `\n${failed} required check(s) failed.` : "\nReady: run pnpm e2e and the checklist in docs/PAYPAL_ASSUMPTIONS.md.");
 process.exit(failed ? 1 : 0);
+
+export {};
