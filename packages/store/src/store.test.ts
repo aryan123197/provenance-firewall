@@ -206,6 +206,29 @@ describe("purchase order consumption", () => {
   });
 });
 
+describe("dashboard queries", () => {
+  test("listDecisions returns newest first with execution and approval state", () => {
+    store.decide(intent({ idempotencyKey: "a" }), policy);
+    store.decide(intent({ idempotencyKey: "b", amount: f("user", 60000) }), policy);
+    store.saveExecution("a", { state: "executed", retryable: false, payload: {}, reference: "B1" });
+    const rows = store.listDecisions();
+    expect(rows.map((r) => r.idempotencyKey)).toEqual(["b", "a"]);
+    expect(rows[0]).toMatchObject({ verdict: "require_approval", approval: { status: "pending" }, execution: null, amount: 60000, payee: "Acme Supplies" });
+    expect(rows[1]).toMatchObject({ verdict: "allow", execution: "executed", approval: null });
+    expect(store.listDecisions({ limit: 1, offset: 1 }).map((r) => r.idempotencyKey)).toEqual(["a"]);
+  });
+  test("getDecisionRecord gathers the decision, execution and audit entries for one key", () => {
+    store.decide(intent({ idempotencyKey: "a" }), policy);
+    store.saveExecution("a", { state: "executed", retryable: false, payload: { reference: "B1" }, reference: "B1" });
+    store.decide(intent({ idempotencyKey: "other" }), policy);
+    const rec = store.getDecisionRecord("a")!;
+    expect(rec.decision.fields.payee.origins[0]?.kind).toBe("vendor");
+    expect(rec.execution?.reference).toBe("B1");
+    expect(rec.audit.map((e) => e.type)).toEqual(["decision", "execution"]);
+    expect(store.getDecisionRecord("missing")).toBeNull();
+  });
+});
+
 describe("audit immutability", () => {
   test("decisions cannot be updated or deleted", () => {
     store.decide(intent(), policy);

@@ -45,7 +45,7 @@ export type AuditVerification =
   | { ok: true; count: number; head: { seq: number; hash: string } | null }
   | { ok: false; seq: number; reason: string };
 
-interface Row {
+export interface Row {
   seq: number;
   ts: string;
   type: string;
@@ -56,7 +56,7 @@ interface Row {
   signature: string;
 }
 
-const toEntry = (r: Row): AuditEntry => ({
+export const auditRowToEntry = (r: Row): AuditEntry => ({
   seq: r.seq,
   ts: r.ts,
   type: r.type,
@@ -100,7 +100,7 @@ export class AuditLog {
     const rows = this.db
       .prepare("SELECT * FROM audit_log WHERE seq > ? ORDER BY seq LIMIT ?")
       .all(opts.after ?? 0, opts.limit ?? 1000) as Row[];
-    return rows.map(toEntry);
+    return rows.map(auditRowToEntry);
   }
 
   head(): { seq: number; hash: string } | null {

@@ -12,7 +12,7 @@ import {
   type ResolvedIntent,
   type VendorRecord,
 } from "@pfw/core";
-import { AuditLog, createSigner, type Signer } from "./audit";
+import { AuditLog, auditRowToEntry, createSigner, type AuditEntry, type Signer } from "./audit";
 import { SCHEMA } from "./schema";
 
 export class IdempotencyConflictError extends Error {
@@ -99,6 +99,34 @@ export type ResolveApprovalResult =
   /** Re-evaluation now denies the payment (a cap was used up, say). An approval cannot override a deny. */
   | { ok: false; reason: string; decision: Decision };
 
+/** One row of the activity feed. */
+export interface DecisionSummary {
+  idempotencyKey: string;
+  agentId: string;
+  createdAt: string;
+  verdict: Decision["verdict"];
+  rule: Decision["rule"];
+  reason: string;
+  alert: boolean;
+  payee: string;
+  account: string;
+  amount: number;
+  currency: string;
+  payeeTrust: number;
+  execution: "executed" | "failed" | null;
+  providerStatus: string | null;
+  approval: { id: string; status: Approval["status"] } | null;
+}
+
+/** Everything the decision-replay screen shows for one payment. */
+export interface DecisionRecord {
+  summary: DecisionSummary;
+  decision: Decision;
+  execution: (ExecutionRecord & { providerStatus: string | null }) | null;
+  approval: Approval | null;
+  audit: AuditEntry[];
+}
+
 export interface StoreOptions {
   path?: string;
   clock?: () => Date;
@@ -118,6 +146,37 @@ function requestHash(i: ResolvedIntent): string {
   };
   return createHash("sha256").update(canonicalJson(body)).digest("hex");
 }
+
+interface SummaryRow {
+  idempotency_key: string;
+  agent_id: string;
+  created_at: string;
+  decision_json: string;
+  exec_state: "executed" | "failed" | null;
+  provider_status: string | null;
+  approval_id: string | null;
+  approval_status: Approval["status"] | null;
+}
+const toSummary = (r: SummaryRow): DecisionSummary => {
+  const d = JSON.parse(r.decision_json) as Decision;
+  return {
+    idempotencyKey: r.idempotency_key,
+    agentId: r.agent_id,
+    createdAt: r.created_at,
+    verdict: d.verdict,
+    rule: d.rule,
+    reason: d.reason,
+    alert: d.alert,
+    payee: String(d.fields.payee.value),
+    account: String(d.fields.account.value),
+    amount: Number(d.fields.amount.value),
+    currency: String(d.fields.currency.value),
+    payeeTrust: d.fields.payee.trust,
+    execution: r.exec_state,
+    providerStatus: r.provider_status,
+    approval: r.approval_id && r.approval_status ? { id: r.approval_id, status: r.approval_status } : null,
+  };
+};
 
 interface ApprovalRow {
   id: string;
@@ -229,6 +288,47 @@ export class Store {
       }
       return { decision, replayed: false };
     }).immediate();
+  }
+
+  /** Newest first. */
+  listDecisions(opts: { limit?: number; offset?: number } = {}): DecisionSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT d.idempotency_key, d.agent_id, d.created_at, d.decision_json,
+                e.state AS exec_state, e.provider_status, a.id AS approval_id, a.status AS approval_status
+           FROM decisions d
+           LEFT JOIN executions e ON e.idempotency_key = d.idempotency_key
+           LEFT JOIN approvals a ON a.idempotency_key = d.idempotency_key
+          ORDER BY d.rowid DESC LIMIT ? OFFSET ?`,
+      )
+      .all(opts.limit ?? 200, opts.offset ?? 0) as SummaryRow[];
+    return rows.map(toSummary);
+  }
+
+  getDecisionRecord(key: string): DecisionRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT d.idempotency_key, d.agent_id, d.created_at, d.decision_json,
+                e.state AS exec_state, e.provider_status, a.id AS approval_id, a.status AS approval_status
+           FROM decisions d
+           LEFT JOIN executions e ON e.idempotency_key = d.idempotency_key
+           LEFT JOIN approvals a ON a.idempotency_key = d.idempotency_key
+          WHERE d.idempotency_key = ?`,
+      )
+      .get(key) as SummaryRow | undefined;
+    if (!row) return null;
+    const audit = (
+      this.db.prepare("SELECT * FROM audit_log WHERE json_extract(payload_json, '$.idempotencyKey') = ? ORDER BY seq").all(key) as Parameters<
+        typeof auditRowToEntry
+      >[0][]
+    ).map(auditRowToEntry);
+    return {
+      summary: toSummary(row),
+      decision: JSON.parse(row.decision_json) as Decision,
+      execution: this.getExecution(key),
+      approval: this.getApprovalByKey(key),
+      audit,
+    };
   }
 
   getApproval(id: string): Approval | null {

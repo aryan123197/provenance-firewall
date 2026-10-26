@@ -5,6 +5,8 @@ export {
   type Approval,
   type ApprovalGrant,
   type DecideResult,
+  type DecisionRecord,
+  type DecisionSummary,
   type Drift,
   type DriftKind,
   type ExecutionRecord,
