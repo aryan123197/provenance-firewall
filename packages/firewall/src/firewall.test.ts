@@ -221,8 +221,8 @@ describe("approval flow", () => {
     const o = await pending();
     await fw.resolveApproval(o.approvalId, { approver: "dana", approve: true });
     const types = store.audit.entries().map((e) => e.type);
-    expect(types).toEqual(["decision", "approval_requested", "approval_granted", "execution"]);
-    expect(store.audit.verify()).toMatchObject({ ok: true, count: 4 });
+    expect(types).toEqual(["decision", "approval_requested", "purchase_order_closed", "approval_granted", "execution"]);
+    expect(store.audit.verify()).toMatchObject({ ok: true, count: 5 });
     const spent = store.db.prepare("SELECT SUM(amount) AS t FROM payments").get() as { t: number };
     expect(spent.t).toBe(45000);
   });

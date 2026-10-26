@@ -4,6 +4,7 @@ import {
   canonicalJson,
   evaluate,
   isTrusted,
+  parseHandle,
   type Decision,
   type Policy,
   type PolicyState,
@@ -224,6 +225,7 @@ export class Store {
         this.db
           .prepare("INSERT INTO payments (idempotency_key, agent_id, vendor_id, amount, currency, created_at) VALUES (?, ?, ?, ?, ?, ?)")
           .run(intent.idempotencyKey, intent.agentId, vendor?.id ?? null, intent.amount.value, intent.currency.value, at);
+        this.consumePurchaseOrder(intent);
       }
       return { decision, replayed: false };
     }).immediate();
@@ -282,6 +284,7 @@ export class Store {
       this.db
         .prepare("INSERT INTO payments (idempotency_key, agent_id, vendor_id, amount, currency, created_at) VALUES (?, ?, ?, ?, ?, ?)")
         .run(a.idempotencyKey, a.intent.agentId, vendor?.id ?? null, a.intent.amount.value, a.intent.currency.value, at);
+      this.consumePurchaseOrder(a.intent);
       this.audit.append("approval_granted", {
         approvalId: id,
         idempotencyKey: a.idempotencyKey,
@@ -417,6 +420,16 @@ export class Store {
     if (!cur) return;
     if (cur.provider_status && (STATUS_RANK[status] ?? 0) < (STATUS_RANK[cur.provider_status] ?? 0)) return;
     this.db.prepare("UPDATE executions SET provider_status = ? WHERE idempotency_key = ?").run(status, key);
+  }
+
+  /** A purchase order covers one payment: once paid against, it closes, so a re-sent invoice cannot be paid again. */
+  private consumePurchaseOrder(i: ResolvedIntent): void {
+    const fromHandle = i.amount.origins.find((o) => o.kind === "po");
+    let poId = fromHandle ? parseHandle(fromHandle.ref)?.id : undefined;
+    if (!poId) poId = this.purchaseOrderFor(i)?.id;
+    if (!poId) return;
+    const r = this.db.prepare("UPDATE purchase_orders SET status = 'closed' WHERE id = ? AND status = 'open'").run(poId);
+    if (r.changes > 0) this.audit.append("purchase_order_closed", { purchaseOrderId: poId, idempotencyKey: i.idempotencyKey });
   }
 
   private matchVendor(i: ResolvedIntent): VendorRecord | null {

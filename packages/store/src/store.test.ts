@@ -178,6 +178,34 @@ describe("purchase orders", () => {
   });
 });
 
+describe("purchase order consumption", () => {
+  const inv = (k: string, amount: number) => intent({ idempotencyKey: k, amount: f("invoice", amount) });
+  test("a paid purchase order closes, so a re-sent invoice needs approval", () => {
+    store.addPurchaseOrder({ id: "po1", vendorId: "acme", amount: 4500, currency: "USD" });
+    expect(store.decide(inv("first", 4500), policy).decision.verdict).toBe("allow");
+    expect(store.decide(inv("resent", 4500), policy).decision).toMatchObject({ verdict: "require_approval", rule: "amount_mismatch" });
+    expect(store.audit.entries().some((e) => e.type === "purchase_order_closed")).toBe(true);
+  });
+  test("a po: handle amount closes that order too", () => {
+    store.addPurchaseOrder({ id: "po1", vendorId: "acme", amount: 4500, currency: "USD" });
+    const viaHandle = (k: string) => intent({ idempotencyKey: k, amount: tag(4500, { kind: "po", ref: "po:po1#amount" }) });
+    store.decide(viaHandle("a"), policy);
+    expect(store.db.prepare("SELECT status FROM purchase_orders WHERE id = 'po1'").get()).toEqual({ status: "closed" });
+  });
+  test("denied and pending intents leave the order open", () => {
+    store.addPurchaseOrder({ id: "po1", vendorId: "acme", amount: 4500, currency: "USD" });
+    store.decide(inv("big", 450000), policy); // needs approval
+    expect(store.db.prepare("SELECT status FROM purchase_orders WHERE id = 'po1'").get()).toEqual({ status: "open" });
+  });
+  test("orders are used one at a time, closest first", () => {
+    store.addPurchaseOrder({ id: "po1", vendorId: "acme", amount: 4000, currency: "USD" });
+    store.addPurchaseOrder({ id: "po2", vendorId: "acme", amount: 4000, currency: "USD" });
+    expect(store.decide(inv("x1", 4000), policy).decision.verdict).toBe("allow");
+    expect(store.decide(inv("x2", 4000), policy).decision.verdict).toBe("allow");
+    expect(store.decide(inv("x3", 4000), policy).decision.verdict).toBe("require_approval");
+  });
+});
+
 describe("audit immutability", () => {
   test("decisions cannot be updated or deleted", () => {
     store.decide(intent(), policy);
