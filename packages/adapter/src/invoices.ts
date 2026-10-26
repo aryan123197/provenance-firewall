@@ -112,13 +112,14 @@ export class PayPalInvoices {
         unit_amount: { currency_code: cur, value: formatAmount(i.amount, cur) },
       })),
     };
-    const res = (await this.http.request("POST", "/v2/invoicing/invoices", body)) as { href?: string } | undefined;
-    const id = res?.href?.split("/").pop();
-    if (!id) throw new AdapterError("PayPal did not return the new invoice's link", false);
+    // PayPal answers 201 with a link to the new invoice; accept a plain id too, in case the response carries one.
+    const res = (await this.http.request("POST", "/v2/invoicing/invoices", body)) as { id?: string; href?: string } | undefined;
+    const id = res?.id ?? res?.href?.split("?")[0]?.split("/").pop();
+    if (!id) throw new AdapterError("PayPal did not return the new invoice's id or link", false);
     return checkId(id);
   }
 
-  /** Sends a draft to its recipient, which makes it a real (sandbox) invoice. */
+  /** Sends a draft to its recipient, which makes it a real (sandbox) invoice. Any 2xx counts; the response body is not used. */
   async send(id: string): Promise<void> {
     await this.http.request("POST", `/v2/invoicing/invoices/${checkId(id)}/send`, { send_to_recipient: true, send_to_invoicer: false });
   }

@@ -93,7 +93,8 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
       if (!inv) return json(404, { name: "RESOURCE_NOT_FOUND" });
       if (invMatch[2] && init.method === "POST") {
         inv.status = "SENT";
-        return new Response(null, { status: 202 });
+        // PayPal's documentation shows a 200 with a link to the invoice.
+        return json(200, { rel: "self", href: `${url.origin}/v2/invoicing/invoices/${inv.id}`, method: "GET" });
       }
       if (init.method === "GET") return json(200, inv);
     }
