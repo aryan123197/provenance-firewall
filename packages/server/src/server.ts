@@ -9,7 +9,7 @@ import { createFakePayPal } from "@pfw/adapter/testing";
 import { Firewall } from "@pfw/firewall";
 import { createSigner, Store } from "@pfw/store";
 import { VENDORS, type Agent } from "@pfw/harness";
-import { AnthropicPolicyCompiler, LlmAgent, createClient, type MessagesClient, type PolicyCompiler } from "@pfw/llm";
+import { AnthropicPolicyCompiler, LlmAgent, createClient, withDailyBudget, type MessagesClient, type PolicyCompiler } from "@pfw/llm";
 import { createApp, type Runtime } from "./app";
 import { registerDemo } from "./demo";
 
@@ -31,6 +31,8 @@ export interface ServerConfig {
   demo: boolean;
   /** JSON file of `{ vendors, purchaseOrders }`. The registry is operator-maintained, never agent-writable. */
   registryPath?: string;
+  /** Most Claude API calls per UTC day, across the policy compiler and the live agent. */
+  llmDailyCalls: number;
   /** A live Claude client for the demo agent and the policy compiler. Defaults to one built from the environment, if any. */
   llm?: MessagesClient | null;
   /** Test seams. */
@@ -55,6 +57,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     authorityKey: env.AUTHORITY_KEY ?? randomBytes(32).toString("hex"),
     ...(env.AUDIT_SIGNING_KEY ? { auditKey: env.AUDIT_SIGNING_KEY } : {}),
     ...(env.OPERATOR_TOKEN ? { operatorToken: env.OPERATOR_TOKEN } : {}),
+    llmDailyCalls: Number(env.LLM_DAILY_CALLS ?? 300),
     openOperator: env.OPEN_OPERATOR === "1",
     demo,
     ...(env.REGISTRY_PATH ? { registryPath: env.REGISTRY_PATH } : {}),
@@ -113,7 +116,8 @@ export function buildServer(cfg: ServerConfig): Server {
   let runtime = createRuntime();
   const readCard = () => (existsSync(cfg.scorecardPath) ? JSON.parse(readFileSync(cfg.scorecardPath, "utf8")) : undefined);
 
-  const llm = cfg.llm === undefined ? createClient() : cfg.llm;
+  const raw = cfg.llm === undefined ? createClient() : cfg.llm;
+  const llm = raw ? withDailyBudget(raw, cfg.llmDailyCalls) : null;
   const compiler = cfg.compiler ?? (llm ? new AnthropicPolicyCompiler(llm) : undefined);
   const llmAgent = cfg.llmAgent ?? (llm ? new LlmAgent({ client: llm }) : undefined);
 

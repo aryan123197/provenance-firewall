@@ -21,6 +21,7 @@ beforeEach(() => {
     host: "127.0.0.1",
     authorityKey: "test-authority-key-0123456789",
     openOperator: true,
+    llmDailyCalls: 300,
     demo: true,
   });
 });

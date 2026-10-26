@@ -8,6 +8,7 @@ import {
   type Agent,
   type RunResult,
 } from "@pfw/harness";
+import { LlmBudgetError, LlmRefusalError } from "@pfw/llm";
 import type { Runtime } from "./app";
 
 export interface DemoDeps {
@@ -61,7 +62,14 @@ export function registerDemo(app: FastifyInstance, deps: DemoDeps, guard: (req: 
       };
     });
     busy = job.catch(() => undefined);
-    return job;
+    try {
+      return await job;
+    } catch (e) {
+      if (e instanceof LlmBudgetError) return reply.code(429).send({ error: e.message });
+      if (e instanceof LlmRefusalError) return reply.code(422).send({ error: e.message });
+      if (req.body?.agent === "llm") return reply.code(502).send({ error: `The Claude agent failed: ${e instanceof Error ? e.message : String(e)}` });
+      throw e;
+    }
   });
 
   if (deps.reset) {

@@ -17,7 +17,7 @@ import {
 } from "@pfw/core";
 import type { Firewall } from "@pfw/firewall";
 import { ApprovalStateError, PolicyConflictError, RegistryError, type Store } from "@pfw/store";
-import { LlmRefusalError, type PolicyCompiler } from "@pfw/llm";
+import { LlmBudgetError, LlmRefusalError, type PolicyCompiler } from "@pfw/llm";
 import { z } from "zod";
 
 /** The live pieces. A getter is used so a demo reset can swap in a fresh database. */
@@ -199,7 +199,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
     };
   };
 
-  app.post<{ Body: { english?: string } }>("/api/policy/compile", async (req, reply) => {
+  app.post<{ Body: { english?: string } }>("/api/policy/compile", { preHandler: requireOperator }, async (req, reply) => {
     if (!deps.compiler) return reply.code(503).send({ error: "Plain-English policies need a Claude API key (ANTHROPIC_API_KEY) on the server." });
     const english = req.body?.english;
     if (typeof english !== "string" || !english.trim()) return reply.code(400).send({ error: "Write the policy you want first." });
@@ -208,6 +208,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
       const out = await deps.compiler.compile(english, active);
       return { baseVersion: active.version, english, summary: out.summary, patch: out.patch, unsupported: out.unsupported, examples: out.examples, ...review(active, out.patch, out.examples) };
     } catch (e) {
+      if (e instanceof LlmBudgetError) return reply.code(429).send({ error: e.message });
       if (e instanceof LlmRefusalError) return reply.code(422).send({ error: e.message });
       if (e instanceof z.ZodError) return reply.code(422).send({ error: "The compiled policy was not valid, so it was discarded. Try rephrasing." });
       return reply.code(502).send({ error: e instanceof Error ? e.message : "The compiler failed." });

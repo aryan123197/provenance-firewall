@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test } from "vitest";
 import type { PolicyDoc } from "@pfw/core";
 import type { Agent } from "@pfw/harness";
-import type { CompilerOutput, PolicyCompiler } from "@pfw/llm";
+import { LlmBudgetError, LlmRefusalError, type CompilerOutput, type MessagesClient, type PolicyCompiler } from "@pfw/llm";
 import { buildServer, type Server } from "./server";
 
 const policyPath = new URL("../../../policies/default.policy.yaml", import.meta.url).pathname;
@@ -34,6 +34,7 @@ const build = (extra: Partial<Parameters<typeof buildServer>[0]> = {}, withCompi
     authorityKey: "test-authority-key-0123456789",
     operatorToken: "s3cret-operator-token",
     openOperator: false,
+    llmDailyCalls: 300,
     demo: false,
     llm: null,
     ...(withCompiler ? { compiler: { compile: async (english, active) => (calls.push({ english, active }), output) } satisfies PolicyCompiler } : {}),
@@ -47,7 +48,7 @@ beforeEach(() => {
 });
 
 const compile = async (english = "contractors under $500, never pay new vendors on weekends") => {
-  const r = await server.app.inject({ method: "POST", url: "/api/policy/compile", payload: { english } });
+  const r = await server.app.inject({ method: "POST", url: "/api/policy/compile", headers: op, payload: { english } });
   return { status: r.statusCode, body: r.json() as Record<string, any> };
 };
 const activate = (body: Record<string, unknown>, headers: Record<string, string> = op) =>
@@ -67,7 +68,7 @@ describe("compile", () => {
   });
   test("without an API key the endpoint says what is missing", async () => {
     const bare = build({}, false);
-    const r = await bare.app.inject({ method: "POST", url: "/api/policy/compile", payload: { english: "x" } });
+    const r = await bare.app.inject({ method: "POST", url: "/api/policy/compile", headers: op, payload: { english: "x" } });
     expect(r.statusCode).toBe(503);
     expect(r.json()).toMatchObject({ error: expect.stringContaining("ANTHROPIC_API_KEY") });
     expect((await bare.app.inject({ url: "/api/status" })).json()).toMatchObject({ compilerAvailable: false, llmAgentAvailable: false });
@@ -77,7 +78,7 @@ describe("compile", () => {
     output = { ...SPEC_OUTPUT, patch: { newPayeeDenyDays: [9] } };
     expect((await compile()).status).toBe(422);
     const broken = build({ compiler: { compile: async () => { throw new Error("upstream down"); } } });
-    const r = await broken.app.inject({ method: "POST", url: "/api/policy/compile", payload: { english: "x" } });
+    const r = await broken.app.inject({ method: "POST", url: "/api/policy/compile", headers: op, payload: { english: "x" } });
     expect(r.statusCode).toBe(502);
   });
   test("unsupported clauses are returned for the reviewer, never guessed into rules", async () => {
@@ -91,6 +92,14 @@ describe("compile", () => {
     const { body } = await compile();
     expect(body.canActivate).toBe(false);
     expect(body.tests.filter((t: { passed: boolean }) => !t.passed).map((t: { description: string }) => t.description)).toContain("A contractor invoice of $500.00 is paid");
+  });
+});
+
+describe("compile needs the operator token, because it spends the API budget", () => {
+  test("refused without it, and the compiler is never called", async () => {
+    const r = await server.app.inject({ method: "POST", url: "/api/policy/compile", payload: { english: "x" } });
+    expect(r.statusCode).toBe(401);
+    expect(calls).toHaveLength(0);
   });
 });
 
@@ -207,5 +216,40 @@ describe("demo runner with a live agent", () => {
   test("the scripted agent stays the default", async () => {
     const d = build({ demo: true });
     expect((await d.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match" } })).json()).toMatchObject({ agent: "gullible-scripted", agentKind: "scripted" });
+  });
+});
+
+describe("the Claude budget and agent failures reach the client as clear errors", () => {
+  const failing = (e: Error): Agent => ({ name: "failing-llm", kind: "llm", run: async () => { throw e; } });
+  const run = async (agent: Agent) => {
+    const s = build({ demo: true, llmAgent: agent });
+    return s.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match", agent: "llm" } });
+  };
+
+  test("an exhausted daily budget is a 429", async () => {
+    const r = await run(failing(new LlmBudgetError(5)));
+    expect(r.statusCode).toBe(429);
+    expect(r.json()).toMatchObject({ error: expect.stringContaining("daily limit") });
+  });
+  test("a model refusal is a 422 and any other agent failure is a 502 naming the cause", async () => {
+    expect((await run(failing(new LlmRefusalError("cyber")))).statusCode).toBe(422);
+    const r = await run(failing(new Error("upstream overloaded")));
+    expect(r.statusCode).toBe(502);
+    expect(r.json()).toMatchObject({ error: expect.stringContaining("upstream overloaded") });
+  });
+  test("the compile endpoint maps a budget error to 429", async () => {
+    const s = build({}, false);
+    const budgeted = build({ compiler: { compile: async () => { throw new LlmBudgetError(5); } } }, false);
+    expect((await budgeted.app.inject({ method: "POST", url: "/api/policy/compile", headers: op, payload: { english: "x" } })).statusCode).toBe(429);
+    void s;
+  });
+  test("the server wraps its Claude client in the configured daily budget", async () => {
+    const calls: number[] = [];
+    const client: MessagesClient = { messages: { async create() { calls.push(1); throw new Error("stop"); } } };
+    const s = build({ llm: client, llmDailyCalls: 1 }, false);
+    const compile = () => s.app.inject({ method: "POST", url: "/api/policy/compile", headers: op, payload: { english: "approve over $2k" } });
+    expect((await compile()).statusCode).toBe(502); // first call reaches the (failing) client
+    expect((await compile()).statusCode).toBe(429); // second is stopped by the budget
+    expect(calls).toHaveLength(1);
   });
 });

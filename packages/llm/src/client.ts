@@ -24,3 +24,35 @@ export class LlmRefusalError extends Error {
     this.name = "LlmRefusalError";
   }
 }
+
+export class LlmBudgetError extends Error {
+  constructor(readonly limit: number) {
+    super(`the daily limit of ${limit} Claude API calls has been reached; try again tomorrow or raise LLM_DAILY_CALLS`);
+    this.name = "LlmBudgetError";
+  }
+}
+
+/**
+ * Caps how many API calls this process makes per UTC day. A public demo with open operator access would otherwise let anyone
+ * spend the owner's API budget through the policy compiler or the live agent. Counted in memory: a restart resets it, so it
+ * bounds accidents and casual abuse, not a determined attacker who can restart the server.
+ */
+export function withDailyBudget(client: MessagesClient, maxCalls: number, now: () => Date = () => new Date()): MessagesClient & { used(): number } {
+  let day = now().toISOString().slice(0, 10);
+  let used = 0;
+  return {
+    used: () => used,
+    messages: {
+      async create(params) {
+        const today = now().toISOString().slice(0, 10);
+        if (today !== day) {
+          day = today;
+          used = 0;
+        }
+        if (used >= maxCalls) throw new LlmBudgetError(maxCalls);
+        used++;
+        return client.messages.create(params);
+      },
+    },
+  };
+}
