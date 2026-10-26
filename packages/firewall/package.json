@@ -1,0 +1,10 @@
+{
+  "name": "@pfw/firewall",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Service that wires core, store and adapter; the only path to PayPal",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@pfw/core": "workspace:*", "@pfw/store": "workspace:*", "@pfw/adapter": "workspace:*" }
+}
