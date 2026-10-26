@@ -49,11 +49,29 @@ describe("PayPalInvoices", () => {
     });
   });
 
-  test("send makes a draft SENT and tolerates PayPal's empty 202 body", async () => {
+  test("send makes a draft SENT, whether PayPal answers with a link body or an empty one", async () => {
     const { invoices } = setup();
     const id = await seed(invoices);
     await invoices.send(id);
     expect((await invoices.get(id)).status).toBe("SENT");
+  });
+
+  test("send also copes with an empty 202, and create accepts a plain id in place of a link", async () => {
+    const fake = createFakePayPal();
+    const real = fake.fetch;
+    const quirky: typeof fetch = async (input, init) => {
+      const res = await real(input, init);
+      if (String(input).endsWith("/send")) return new Response(null, { status: 202 });
+      if (init?.method === "POST" && String(input).endsWith("/v2/invoicing/invoices")) {
+        const { href } = (await res.json()) as { href: string };
+        return new Response(JSON.stringify({ id: href.split("/").pop() }), { status: 201 });
+      }
+      return res;
+    };
+    const inv = new PayPalInvoices({ clientId: "test-id", clientSecret: "test-secret", baseUrl: "http://localhost:9999", fetch: quirky });
+    const id = await seed(inv);
+    await expect(inv.send(id)).resolves.toBeUndefined();
+    expect((await inv.get(id)).status).toBe("SENT");
   });
 
   test("list returns every invoice", async () => {

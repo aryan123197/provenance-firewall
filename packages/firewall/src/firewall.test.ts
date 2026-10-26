@@ -318,3 +318,16 @@ describe("webhook reconciliation", () => {
     expect(store.audit.verify().ok).toBe(true);
   });
 });
+
+describe("strict duplicate handling end to end", () => {
+  test("a lost response followed by a retry is one executed payment, not a recorded failure", async () => {
+    const strictFake = createFakePayPal({ duplicates: "reject" });
+    const adapter = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: strictFake.fetch });
+    const f2 = new Firewall({ store, adapter, authority, policy });
+    strictFake.failNext("lost_response");
+    expect(await f2.submit(proposal(), ctx)).toMatchObject({ status: "execution_failed", error: { retryable: true } });
+    expect(await f2.submit(proposal(), ctx)).toMatchObject({ status: "executed", receipt: { reference: "FAKEBATCH0001" } });
+    expect(strictFake.payouts).toHaveLength(1);
+    expect(store.getExecution("pay-1")).toMatchObject({ state: "executed" });
+  });
+});

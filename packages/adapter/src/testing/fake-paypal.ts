@@ -19,16 +19,21 @@ export interface FakePayout {
   requestId: string | undefined;
 }
 
-export function createFakePayPal(opts: { clientId?: string; clientSecret?: string } = {}) {
+export function createFakePayPal(opts: { clientId?: string; clientSecret?: string; duplicates?: "replay" | "reject" } = {}) {
+  // "replay": a repeated PayPal-Request-Id returns the original response. "reject": a reused sender_batch_id is refused with a
+  // link to the original payout, whatever the request id (the strict reading of PayPal's documentation).
+  const duplicates = opts.duplicates ?? "replay";
   const clientId = opts.clientId ?? "test-id";
   const clientSecret = opts.clientSecret ?? "test-secret";
   const calls: FakeCall[] = [];
   const faults: Fault[] = [];
   const byRequestId = new Map<string, { status: number; json: unknown }>();
   const payouts: FakePayout[] = [];
+  const webhooks = new Map<string, { id: string; url: string; event_types: { name: string }[] }>();
+  let hookSeq = 0;
   const invoices = new Map<string, Record<string, unknown> & { status: string }>();
   let invoiceSeq = 0;
-  const batches = new Map<string, { status: string; item: string }>();
+  const batches = new Map<string, { status: string; item: string; senderBatchId: string }>();
   let validToken = "tok-1";
   let tokenSeq = 1;
   let batchSeq = 0;
@@ -57,6 +62,20 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
     if (fault && !loseResponse) return json(fault, { name: "FAULT" });
     if (headers.Authorization !== `Bearer ${validToken}`) return json(401, { name: "AUTHENTICATION_FAILURE" });
 
+    // ---- Notifications (webhook registration) ----
+    if (url.pathname === "/v1/notifications/webhooks" && init.method === "POST") {
+      const b = body as { url: string; event_types: { name: string }[] };
+      const id = `FAKEHOOK${++hookSeq}`;
+      webhooks.set(id, { id, url: b.url, event_types: b.event_types });
+      return json(201, webhooks.get(id));
+    }
+    if (url.pathname === "/v1/notifications/webhooks" && init.method === "GET") return json(200, { webhooks: [...webhooks.values()] });
+    const hookMatch = /^\/v1\/notifications\/webhooks\/([^/]+)$/.exec(url.pathname);
+    if (hookMatch && init.method === "DELETE") {
+      if (!webhooks.delete(hookMatch[1]!)) return json(404, { name: "INVALID_RESOURCE_ID" });
+      return new Response(null, { status: 204 });
+    }
+
     // ---- Invoicing v2 ----
     if (url.pathname === "/v2/invoicing/invoices" && init.method === "POST") {
       const id = `INV2-FAKE-${String(++invoiceSeq).padStart(4, "0")}-TEST`;
@@ -74,7 +93,8 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
       if (!inv) return json(404, { name: "RESOURCE_NOT_FOUND" });
       if (invMatch[2] && init.method === "POST") {
         inv.status = "SENT";
-        return new Response(null, { status: 202 });
+        // PayPal's documentation shows a 200 with a link to the invoice.
+        return json(200, { rel: "self", href: `${url.origin}/v2/invoicing/invoices/${inv.id}`, method: "GET" });
       }
       if (init.method === "GET") return json(200, inv);
     }
@@ -85,7 +105,15 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
     }
     if (init.method === "POST" && url.pathname === "/v1/payments/payouts") {
       const rid = headers["PayPal-Request-Id"];
-      if (rid && byRequestId.has(rid)) {
+      const sbi = (body as { sender_batch_header?: { sender_batch_id?: string } }).sender_batch_header?.sender_batch_id;
+      if (duplicates === "reject" && sbi) {
+        const orig = [...batches.entries()].find(([, b]) => b.senderBatchId === sbi);
+        if (orig) {
+          if (loseResponse) throw new Error("socket hang up");
+          return json(400, { name: "USER_BUSINESS_ERROR", message: `Duplicate sender_batch_id ${sbi}`, links: [{ href: `${url.origin}/v1/payments/payouts/${orig[0]}`, rel: "self", method: "GET" }] });
+        }
+      }
+      if (duplicates === "replay" && rid && byRequestId.has(rid)) {
         const prior = byRequestId.get(rid)!;
         if (loseResponse) throw new Error("socket hang up");
         return json(prior.status, prior.json); // PayPal replays the original response for a repeated request id
@@ -93,7 +121,7 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
       const id = `FAKEBATCH${String(++batchSeq).padStart(4, "0")}`;
       const b = body as { items: { sender_item_id: string; receiver: string; amount: { value: string; currency: string } }[] };
       const item = b.items[0]!;
-      batches.set(id, { status: "PENDING", item: item.sender_item_id });
+      batches.set(id, { status: "PENDING", item: item.sender_item_id, senderBatchId: sbi ?? "" });
       payouts.push({ batchId: id, receiver: item.receiver, amount: parseMinorUnits(item.amount.value) ?? -1, currency: item.amount.currency, requestId: rid });
       const res = { batch_header: { payout_batch_id: id, batch_status: "PENDING" } };
       if (rid) byRequestId.set(rid, { status: 201, json: res });
@@ -104,7 +132,7 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
     if (init.method === "GET" && m) {
       const b = batches.get(m[1]!);
       if (!b) return json(404, { name: "RESOURCE_NOT_FOUND" });
-      return json(200, { batch_header: { payout_batch_id: m[1], batch_status: b.status }, items: [{ transaction_status: b.status }] });
+      return json(200, { batch_header: { payout_batch_id: m[1], batch_status: b.status, sender_batch_header: { sender_batch_id: b.senderBatchId } }, items: [{ transaction_status: b.status }] });
     }
     return json(404, { name: "NOT_FOUND" });
   }) as typeof fetch;
@@ -112,6 +140,8 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
   return {
     fetch: fakeFetch,
     calls,
+    /** Webhooks registered with the fake Notifications API. */
+    webhooks,
     /** Invoices held by the fake Invoicing API, by id. Tests can edit one to simulate a vendor injecting text. */
     invoices,
     /** Payouts that actually exist on the fake PayPal, whether or not the caller saw the response. */

@@ -40,7 +40,7 @@ agent ──proposes (handles)──▶ firewall ──allow / needs approval / 
 | Piece | State |
 | --- | --- |
 | Provenance model, policy engine, idempotency, approvals, signed audit log, reconciliation | Implemented and tested (200+ tests, including property tests over tens of thousands of random intents) |
-| PayPal Payouts and Invoicing adapters | Implemented against PayPal's documented APIs and tested against an in-process fake (including an injected invoice read through the Invoicing client and run through both agents). **Neither has yet been run against the live PayPal sandbox**, and the Invoicing field names in particular are from the documentation, not confirmed against live responses. |
+| PayPal Payouts and Invoicing adapters | Implemented against PayPal's documented APIs and tested against an in-process fake (including an injected invoice read through the Invoicing client and run through both agents). **Neither has yet been run against the live PayPal sandbox.** [docs/PAYPAL_ASSUMPTIONS.md](docs/PAYPAL_ASSUMPTIONS.md) lists every API assumption, how well each is backed, and a first-run checklist. |
 | Red-team harness and scorecard | Runs offline. Agent is a deterministic stand-in; payments are an in-process fake. |
 | Dashboard (activity, decision replay, approvals, registry, policy and scorecard) | Implemented. Operator actions need the operator token, entered in the header. |
 | Plain-English policy authoring (compile, diff, generated tests, confirm, versioned in the audit log) | Implemented and tested with a fake model. **Not yet run against the live Claude API.** |
@@ -78,7 +78,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | Variable | Purpose |
 | --- | --- |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Sandbox app credentials. Their presence switches the server from simulated to sandbox. |
-| `PAYPAL_WEBHOOK_ID` | Id of the webhook you register for `/api/webhooks/paypal`, to verify signatures. |
+| `PAYPAL_WEBHOOK_ID` | Id of the webhook you register for `/api/webhooks/paypal`, to verify signatures. `pnpm register:webhook https://your-host/api/webhooks/paypal` registers it and prints the id. |
 | `PFW_DEMO_RECEIVER` | Email of a sandbox personal account, used by `pnpm e2e` as the registered vendor's account. |
 
 ### Server configuration
@@ -91,6 +91,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | `REGISTRY_PATH` | none | JSON `{ vendors, purchaseOrders }`, the operator-maintained registry |
 | `OPERATOR_TOKEN` | none | Bearer token required to approve or reject |
 | `ANTHROPIC_API_KEY` | none | Enables the policy compiler and the live Claude agent. `PFW_MODEL` overrides the model (default `claude-opus-5-5`). |
+| `RATE_LIMIT_PER_MIN` | `240` | Requests per minute per client IP; `0` turns it off. Set `TRUST_PROXY=1` behind a proxy such as Render so real client addresses are used. |
 | `LLM_DAILY_CALLS` | `300` | Hard cap on Claude API calls per UTC day, across the policy compiler and the live agent. Calls past it return 429. Held in memory, so a restart resets it. |
 | `OPEN_OPERATOR` | off | `1` lets anyone approve or reject. Public demos on simulated or sandbox money only. |
 | `DEMO_MODE` | off | `1` seeds demo vendors and mounts the scenario runner |

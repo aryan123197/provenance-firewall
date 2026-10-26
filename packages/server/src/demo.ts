@@ -72,6 +72,20 @@ export function registerDemo(app: FastifyInstance, deps: DemoDeps, guard: (req: 
     }
   });
 
+  // Shows reconciliation without a live PayPal: report a payment we never authorized, or one that differs from what was authorized.
+  let simSeq = 0;
+  app.post<{ Body: { kind?: "unauthorized" | "mismatch" } }>("/api/demo/simulate-drift", { preHandler: guard }, async (req, reply) => {
+    const { store } = deps.runtime();
+    const id = `sim-${Date.now().toString(36)}-${++simSeq}`;
+    if (req.body?.kind === "mismatch") {
+      const paid = store.listDecisions({ limit: 200 }).find((d) => d.execution === "executed");
+      const exec = paid ? store.getExecution(paid.idempotencyKey) : null;
+      if (!paid || !exec?.reference) return reply.code(409).send({ error: "Run a scenario that pays something first, then report a different amount for it." });
+      return store.recordProviderEvent({ id, type: "PAYMENT.PAYOUTS-ITEM.SUCCEEDED", reference: exec.reference, status: "success", amount: paid.amount * 10, currency: paid.currency, receiver: "attacker@evil.example" });
+    }
+    return store.recordProviderEvent({ id, type: "PAYMENT.PAYOUTS-ITEM.SUCCEEDED", reference: `SIMBATCH${id.toUpperCase().replace(/[^A-Z0-9]/g, "")}`, status: "success", amount: 99_900, currency: "USD", receiver: "vendor-support@evil.example" });
+  });
+
   if (deps.reset) {
     app.post("/api/demo/reset", { preHandler: guard }, async () => {
       await busy;

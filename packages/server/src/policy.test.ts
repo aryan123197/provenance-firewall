@@ -36,6 +36,8 @@ const build = (extra: Partial<Parameters<typeof buildServer>[0]> = {}, withCompi
     operatorToken: "s3cret-operator-token",
     openOperator: false,
     llmDailyCalls: 300,
+    rateLimitPerMinute: 0,
+    trustProxy: false,
     demo: false,
     llm: null,
     ...(withCompiler ? { compiler: { compile: async (english, active) => (calls.push({ english, active }), output) } satisfies PolicyCompiler } : {}),
@@ -269,3 +271,50 @@ describe("audit export", () => {
 });
 
 const post0 = (url: string, payload: Record<string, unknown>) => server.app.inject({ method: "POST", url, headers: op, payload });
+
+describe("simulated mode does not accept PayPal webhooks, so they cannot be forged against a public demo", () => {
+  test("a webhook with the fake's well-known signature is refused", async () => {
+    const hdr = { "paypal-auth-algo": "SHA256withRSA", "paypal-cert-url": "https://api.sandbox.paypal.com/c", "paypal-transmission-id": "t", "paypal-transmission-sig": "valid-sig", "paypal-transmission-time": "2026-10-26T00:00:00Z", "content-type": "application/json" };
+    const body = JSON.stringify({ id: "WH-FORGED", event_type: "PAYMENT.PAYOUTS-ITEM.SUCCEEDED", resource: { payout_batch_id: "EVIL", transaction_status: "SUCCESS", payout_item: { receiver: "x@y.example", amount: { value: "1.00", currency: "USD" } } } });
+    const r = await server.app.inject({ method: "POST", url: "/api/webhooks/paypal", headers: hdr, payload: body });
+    expect(r.statusCode).toBe(400);
+    expect(r.json()).toMatchObject({ status: "rejected" });
+    expect(((await server.app.inject({ url: "/api/drift" })).json() as { drift: unknown[] }).drift).toEqual([]);
+  });
+});
+
+describe("simulate-drift (demo only, operator only)", () => {
+  const sim = (kind: string, headers: Record<string, string> = op, s: Server = server) => s.app.inject({ method: "POST", url: "/api/demo/simulate-drift", headers, payload: { kind } });
+
+  test("needs the operator token and demo mode", async () => {
+    const d = build({ demo: true });
+    expect((await sim("unauthorized", {}, d)).statusCode).toBe(401);
+    expect((await sim("unauthorized", op, server)).statusCode).toBe(404); // demo routes are not mounted outside demo mode
+  });
+  test("an unauthorized payment opens drift and the audit log records it", async () => {
+    const d = build({ demo: true });
+    expect((await sim("unauthorized", op, d)).json()).toMatchObject({ result: "drift", kind: "unmatched_payment" });
+    const drift = (await d.app.inject({ url: "/api/drift" })).json() as { drift: { kind: string; status: string }[] };
+    expect(drift.drift).toMatchObject([{ kind: "unmatched_payment", status: "open" }]);
+    expect(((await d.app.inject({ url: "/api/status" })).json() as { driftOpen: number }).driftOpen).toBe(1);
+    expect(((await d.app.inject({ url: "/api/audit/verify" })).json() as { ok: boolean }).ok).toBe(true);
+  });
+  test("a mismatch needs a payment to report on, then opens a detail_mismatch", async () => {
+    const d = build({ demo: true });
+    expect((await sim("mismatch", op, d)).statusCode).toBe(409);
+    await d.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match" } });
+    expect((await sim("mismatch", op, d)).json()).toMatchObject({ result: "drift", kind: "detail_mismatch" });
+  });
+});
+
+describe("rate limiting", () => {
+  test("a client over the limit gets a 429 with a retry hint; with no limit configured nothing is limited", async () => {
+    const limited = build({ rateLimitPerMinute: 3 });
+    const codes: number[] = [];
+    for (let i = 0; i < 5; i++) codes.push((await limited.app.inject({ url: "/api/status" })).statusCode);
+    expect(codes).toEqual([200, 200, 200, 429, 429]);
+    expect(((await limited.app.inject({ url: "/api/status" })).json() as { error: string }).error).toMatch(/Try again in/);
+    const free = build();
+    for (let i = 0; i < 20; i++) expect((await free.app.inject({ url: "/api/status" })).statusCode).toBe(200);
+  });
+});

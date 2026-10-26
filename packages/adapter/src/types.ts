@@ -35,6 +35,8 @@ export class AdapterError extends Error {
     message: string,
     readonly retryable: boolean,
     readonly httpStatus?: number,
+    /** The provider's error body (parsed JSON when it was JSON), when there was one. */
+    readonly body?: unknown,
   ) {
     super(message);
     this.name = "AdapterError";

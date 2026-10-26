@@ -303,3 +303,6 @@ textarea:disabled, input:disabled { opacity: 0.6; }
 
 .skip-inline { position: absolute; left: -9999px; }
 .skip-inline:focus { position: static; display: inline-block; margin-bottom: 10px; font-weight: 600; }
+
+.drift-demo { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.ok-text { color: var(--allow); font-weight: 600; } .bad-text { color: var(--deny); font-weight: 600; }

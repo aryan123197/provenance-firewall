@@ -44,6 +44,9 @@ export interface AppDeps {
   /** Lets anyone approve or reject. For public demos against simulated or sandbox money only. */
   openOperator?: boolean;
   scorecard?: () => unknown;
+  /** Requests per minute per client IP. Absent or 0 means no limit. */
+  rateLimitPerMinute?: number;
+  trustProxy?: boolean;
   /** Directory of the built dashboard, served at `/`. */
   staticDir?: string;
   /** Extra routes, registered under /api (the demo agent lives here). */
@@ -53,7 +56,26 @@ export interface AppDeps {
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 export function createApp(deps: AppDeps): FastifyInstance {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: false, trustProxy: Boolean(deps.trustProxy) });
+  if (deps.rateLimitPerMinute) {
+    // Public demos can be driven by anyone, and some routes cost money or move sandbox funds, so cap how fast one client can go.
+    // Fixed one-minute windows per client IP, in memory (a restart resets them).
+    const windows = new Map<string, { start: number; count: number }>();
+    const max = deps.rateLimitPerMinute;
+    app.addHook("onRequest", async (req, reply) => {
+      const now = Date.now();
+      if (windows.size > 10_000) for (const [k, w] of windows) if (now - w.start >= 60_000) windows.delete(k);
+      const w = windows.get(req.ip);
+      if (!w || now - w.start >= 60_000) {
+        windows.set(req.ip, { start: now, count: 1 });
+        return;
+      }
+      if (++w.count > max) {
+        const wait = Math.ceil((60_000 - (now - w.start)) / 1000);
+        return reply.code(429).header("retry-after", String(wait)).send({ statusCode: 429, error: `Too many requests. Try again in ${wait} seconds.` });
+      }
+    });
+  }
 
   // Keep the raw body: PayPal's webhook signature covers the exact bytes.
   app.addContentTypeParser("application/json", { parseAs: "string" }, (req, body, done) => {

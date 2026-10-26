@@ -236,3 +236,64 @@ describe("webhook parsing and verification", () => {
     await expect(adapter.verify({}, "{}")).rejects.toThrow(/webhookId/);
   });
 });
+
+
+describe("a reused sender_batch_id (PayPal's strict duplicate handling)", () => {
+  const strict = () => {
+    const fake = createFakePayPal({ duplicates: "reject" });
+    const adapter = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: fake.fetch });
+    return { fake, adapter };
+  };
+
+  test("a retry after a lost response is the original payout, not a failure, and there is still only one payout", async () => {
+    const { fake, adapter } = strict();
+    fake.failNext("lost_response");
+    const a = allowed();
+    await expect(adapter.execute(a)).rejects.toMatchObject({ retryable: true });
+    const r = await adapter.execute(a); // PayPal answers 400 with a link to the original; we recognise it as ours
+    expect(r).toMatchObject({ reference: "FAKEBATCH0001", status: "pending", amount: 4500 });
+    expect(fake.payouts).toHaveLength(1);
+  });
+
+  test("a repeat after a normal success also resolves to the same payout", async () => {
+    const { fake, adapter } = strict();
+    const a = allowed();
+    const first = await adapter.execute(a);
+    expect((await adapter.execute(a)).reference).toBe(first.reference);
+    expect(fake.payouts).toHaveLength(1);
+  });
+
+  test("a 400 that links to someone else's payout is a real error, not a success", async () => {
+    const fake = createFakePayPal();
+    const adapter = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: fake.fetch });
+    // Another party's payout exists with a different sender_batch_id.
+    const other = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: fake.fetch });
+    await other.execute(allowed(intent({ idempotencyKey: "someone-else" })));
+    const realFetch = fake.fetch;
+    const lying: typeof fetch = async (input, init) => {
+      const res = await realFetch(input, init);
+      if (String(input).endsWith("/v1/payments/payouts") && init?.method === "POST") {
+        return new Response(JSON.stringify({ name: "USER_BUSINESS_ERROR", links: [{ href: "http://localhost:9999/v1/payments/payouts/FAKEBATCH0001" }] }), { status: 400 });
+      }
+      return res;
+    };
+    const a2 = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: lying });
+    await expect(a2.execute(allowed(intent({ idempotencyKey: "mine" })))).rejects.toMatchObject({ retryable: false, httpStatus: 400 });
+    void adapter;
+  });
+
+  test("a 400 with no link is a plain non-retryable error", async () => {
+    const { fake, adapter } = strict();
+    fake.failNext(400);
+    await expect(adapter.execute(allowed())).rejects.toMatchObject({ retryable: false, httpStatus: 400 });
+  });
+
+  test("a 409 (a concurrent request with the same key) is retryable, so the retry can pick up the result", async () => {
+    const fake = createFakePayPal();
+    const realFetch = fake.fetch;
+    const conflict: typeof fetch = async (input, init) =>
+      String(input).endsWith("/v1/payments/payouts") && init?.method === "POST" ? new Response(JSON.stringify({ name: "DUPLICATE_REQUEST_ID" }), { status: 409 }) : realFetch(input, init);
+    const adapter = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: conflict });
+    await expect(adapter.execute(allowed())).rejects.toMatchObject({ retryable: true, httpStatus: 409 });
+  });
+});
