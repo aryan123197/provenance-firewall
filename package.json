@@ -14,7 +14,9 @@
     "test:watch": "vitest",
     "check": "pnpm typecheck && pnpm test",
     "e2e": "tsx scripts/e2e.ts",
-    "harness": "tsx scripts/harness.ts"
+    "harness": "tsx scripts/harness.ts",
+    "start": "tsx packages/server/src/main.ts",
+    "dev:demo": "DEMO_MODE=1 OPEN_OPERATOR=1 DATABASE_PATH=:memory: tsx packages/server/src/main.ts"
   },
   "devDependencies": {
     "@pfw/adapter": "workspace:*",
@@ -27,6 +29,7 @@
     "fast-check": "^4.10.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "@pfw/server": "workspace:*"
   }
 }

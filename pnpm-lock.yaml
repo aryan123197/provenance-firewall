@@ -20,6 +20,9 @@ importers:
       '@pfw/harness':
         specifier: workspace:*
         version: link:packages/harness
+      '@pfw/server':
+        specifier: workspace:*
+        version: link:packages/server
       '@pfw/store':
         specifier: workspace:*
         version: link:packages/store
@@ -98,6 +101,9 @@ importers:
       '@pfw/firewall':
         specifier: workspace:*
         version: link:../firewall
+      '@pfw/harness':
+        specifier: workspace:*
+        version: link:../harness
       '@pfw/store':
         specifier: workspace:*
         version: link:../store

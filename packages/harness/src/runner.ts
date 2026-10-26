@@ -1,5 +1,5 @@
 import { loadPolicy, type Policy } from "@pfw/core";
-import { Authority, PayPalAdapter, formatAmount } from "@pfw/adapter";
+import { Authority, PayPalAdapter, formatAmount, type PaymentReceipt } from "@pfw/adapter";
 import { createFakePayPal, type FakePayout } from "@pfw/adapter/testing";
 import { Store } from "@pfw/store";
 import { Firewall } from "@pfw/firewall";
@@ -81,24 +81,41 @@ export async function runBaseline(s: Scenario, agent: Agent): Promise<RunResult>
   return { side: "baseline", payouts: [...fake.payouts], calls, approvedKeys: [], pendingApprovals: 0 };
 }
 
-export async function runFirewalled(s: Scenario, agent: Agent, policy: Policy): Promise<RunResult> {
-  const fake = createFakePayPal();
-  for (const f of s.paypalFaults ?? []) fake.failNext(f);
-  const authority = new Authority("harness-authority-key-0123456789");
-  const adapter = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: BASE, fetch: fake.fetch, now: () => CLOCK.getTime() });
-  const store = new Store({ clock: () => CLOCK });
+/** An already-running firewall to drive, for the live demo. The harness's own runs build a fresh one per scenario. */
+export interface FirewalledEnv {
+  store: Store;
+  firewall: Firewall;
+  /** Prepended to idempotency keys and purchase-order ids so repeated demo runs never collide. */
+  keyPrefix?: string;
+  /** Have a simulated operator approve everything held. Off for live demos, where a person clicks. */
+  autoApprove?: boolean;
+}
+
+export interface FirewalledRun {
+  calls: PayCall[];
+  approvedKeys: string[];
+  pendingApprovals: number;
+  /** One per payment the firewall reports as executed. */
+  receipts: PaymentReceipt[];
+}
+
+export async function runOnFirewall(s: Scenario, agent: Agent, env: FirewalledEnv): Promise<FirewalledRun> {
+  const { store, firewall } = env;
+  const prefix = env.keyPrefix ?? "";
   for (const v of VENDORS) store.upsertVendor(v);
-  for (const p of s.purchaseOrders) store.addPurchaseOrder(p);
-  const firewall = new Firewall({ store, adapter, authority, policy });
+  for (const p of s.purchaseOrders) store.addPurchaseOrder({ ...p, id: `${prefix}${p.id}` });
   const calls: PayCall[] = [];
+  const receipts: PaymentReceipt[] = [];
 
   const { tools } = buildTools(s, VENDORS, async (args, ctx) => {
-    const o = await firewall.submit({ agentId: AGENT_ID, ...args }, ctx);
+    const key = `${prefix}${args.idempotencyKey}`;
+    const o = await firewall.submit({ agentId: AGENT_ID, ...args, idempotencyKey: key }, ctx);
     let result: PayResult;
     let findings: string[] = [];
     switch (o.status) {
       case "executed":
         findings = o.decision.findings.map((f) => f.rule);
+        if (!receipts.some((r) => r.reference === o.receipt.reference)) receipts.push(o.receipt);
         result = { status: "executed", message: "paid", retryable: false };
         break;
       case "denied":
@@ -115,18 +132,35 @@ export async function runFirewalled(s: Scenario, agent: Agent, policy: Policy): 
         result = { status: "invalid", message: o.errors.join("; "), retryable: false };
         break;
     }
-    calls.push({ key: args.idempotencyKey, status: result.status, ...(result.rule ? { rule: result.rule } : {}), message: result.message, findings });
+    calls.push({ key, status: result.status, ...(result.rule ? { rule: result.rule } : {}), message: result.message, findings });
     return result;
   });
 
   await agent.run(s.tasks, tools);
 
   const approvedKeys: string[] = [];
-  if (s.operator === "approve") {
+  if (env.autoApprove) {
     for (const a of store.listApprovals("pending")) {
+      if (!a.idempotencyKey.startsWith(prefix)) continue;
       const r = await firewall.resolveApproval(a.id, { approver: OPERATOR, approve: true, note: "harness operator" });
-      if (r.status === "executed") approvedKeys.push(a.idempotencyKey);
+      if (r.status === "executed") {
+        approvedKeys.push(a.idempotencyKey);
+        receipts.push(r.receipt);
+      }
     }
   }
-  return { side: "firewalled", payouts: [...fake.payouts], calls, approvedKeys, pendingApprovals: store.listApprovals("pending").length };
+  const pendingApprovals = store.listApprovals("pending").filter((a) => a.idempotencyKey.startsWith(prefix)).length;
+  return { calls, approvedKeys, pendingApprovals, receipts };
+}
+
+export async function runFirewalled(s: Scenario, agent: Agent, policy: Policy): Promise<RunResult> {
+  const fake = createFakePayPal();
+  for (const f of s.paypalFaults ?? []) fake.failNext(f);
+  const authority = new Authority("harness-authority-key-0123456789");
+  const adapter = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: BASE, fetch: fake.fetch, now: () => CLOCK.getTime() });
+  const store = new Store({ clock: () => CLOCK });
+  const firewall = new Firewall({ store, adapter, authority, policy });
+
+  const run = await runOnFirewall(s, agent, { store, firewall, autoApprove: s.operator === "approve" });
+  return { side: "firewalled", payouts: [...fake.payouts], calls: run.calls, approvedKeys: run.approvedKeys, pendingApprovals: run.pendingApprovals };
 }

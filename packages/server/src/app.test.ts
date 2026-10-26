@@ -42,7 +42,7 @@ beforeEach(() => {
   ctx.register("vendor:acme#category", "office_supplies");
   ctx.register("user:r#currency", "USD");
   ctx.register("invoice:i#total", 4500);
-  app = createApp({ store, firewall, policy, policyYaml: yaml, mode: "simulated", operatorToken: "s3cret-operator-token", scorecard: () => ({ hello: "card" }) });
+  app = createApp({ runtime: () => ({ store, firewall }), policy, policyYaml: yaml, mode: "simulated", operatorToken: "s3cret-operator-token", scorecard: () => ({ hello: "card" }) });
 });
 
 describe("read endpoints", () => {
@@ -113,7 +113,7 @@ describe("approvals", () => {
     expect((await app.inject({ method: "POST", url: `/api/approvals/${id}/approve`, headers: op, payload: { approver: "agent-1" } })).statusCode).toBe(409);
   });
   test("open operator mode skips the token for public demos", async () => {
-    const open = createApp({ store, firewall, policy, policyYaml: yaml, mode: "simulated", openOperator: true });
+    const open = createApp({ runtime: () => ({ store, firewall }), policy, policyYaml: yaml, mode: "simulated", openOperator: true });
     const id = await hold();
     expect((await open.inject({ method: "POST", url: `/api/approvals/${id}/reject`, payload: { approver: "visitor" } })).statusCode).toBe(200);
   });

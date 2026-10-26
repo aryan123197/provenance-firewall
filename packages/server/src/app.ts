@@ -6,9 +6,14 @@ import type { Policy } from "@pfw/core";
 import type { Firewall } from "@pfw/firewall";
 import { ApprovalStateError, type Store } from "@pfw/store";
 
-export interface AppDeps {
+/** The live pieces. A getter is used so a demo reset can swap in a fresh database. */
+export interface Runtime {
   store: Store;
   firewall: Firewall;
+}
+
+export interface AppDeps {
+  runtime: () => Runtime;
   policy: Policy;
   policyYaml: string;
   /** "sandbox" talks to the PayPal sandbox; "simulated" uses an in-process fake. The dashboard shows which. */
@@ -27,7 +32,6 @@ export interface AppDeps {
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 export function createApp(deps: AppDeps): FastifyInstance {
-  const { store, firewall } = deps;
   const app = Fastify({ logger: false });
 
   // Keep the raw body: PayPal's webhook signature covers the exact bytes.
@@ -50,6 +54,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
   };
 
   app.get("/api/status", async () => {
+    const { store } = deps.runtime();
     const audit = store.audit.verify();
     return {
       mode: deps.mode,
@@ -62,21 +67,21 @@ export function createApp(deps: AppDeps): FastifyInstance {
   });
 
   app.get<{ Querystring: { limit?: string; offset?: string } }>("/api/decisions", async (req) => ({
-    decisions: store.listDecisions({
+    decisions: deps.runtime().store.listDecisions({
       limit: Math.min(Number(req.query.limit ?? 200) || 200, 500),
       offset: Number(req.query.offset ?? 0) || 0,
     }),
   }));
 
   app.get<{ Params: { key: string } }>("/api/decisions/:key", async (req, reply) => {
-    const rec = store.getDecisionRecord(req.params.key);
+    const rec = deps.runtime().store.getDecisionRecord(req.params.key);
     return rec ?? reply.code(404).send({ error: "no such decision" });
   });
 
   app.get<{ Querystring: { status?: string } }>("/api/approvals", async (req, reply) => {
     const s = req.query.status;
     if (s && s !== "pending" && s !== "approved" && s !== "rejected") return reply.code(400).send({ error: "bad status" });
-    return { approvals: store.listApprovals(s as "pending" | "approved" | "rejected" | undefined) };
+    return { approvals: deps.runtime().store.listApprovals(s as "pending" | "approved" | "rejected" | undefined) };
   });
 
   const resolve = (approve: boolean) =>
@@ -85,7 +90,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
       if (typeof approver !== "string" || !approver.trim()) return reply.code(400).send({ error: "approver is required" });
       try {
         const input = { approver: approver.trim(), approve, ...(typeof req.body.note === "string" ? { note: req.body.note } : {}) };
-        return await firewall.resolveApproval(req.params.id, input);
+        return await deps.runtime().firewall.resolveApproval(req.params.id, input);
       } catch (e) {
         if (e instanceof ApprovalStateError) return reply.code(/unknown/.test(e.message) ? 404 : 409).send({ error: e.message });
         throw e;
@@ -94,7 +99,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.post<{ Params: { id: string }; Body: { approver?: string; note?: string } }>("/api/approvals/:id/approve", { preHandler: requireOperator }, resolve(true));
   app.post<{ Params: { id: string }; Body: { approver?: string; note?: string } }>("/api/approvals/:id/reject", { preHandler: requireOperator }, resolve(false));
 
-  app.get("/api/drift", async () => ({ drift: store.listDrift() }));
+  app.get("/api/drift", async () => ({ drift: deps.runtime().store.listDrift() }));
 
   app.get("/api/policy", async () => ({
     policy: { ...deps.policy },
@@ -102,9 +107,9 @@ export function createApp(deps: AppDeps): FastifyInstance {
   }));
 
   app.get<{ Querystring: { after?: string; limit?: string } }>("/api/audit", async (req) => ({
-    entries: store.audit.entries({ after: Number(req.query.after ?? 0) || 0, limit: Math.min(Number(req.query.limit ?? 200) || 200, 1000) }),
+    entries: deps.runtime().store.audit.entries({ after: Number(req.query.after ?? 0) || 0, limit: Math.min(Number(req.query.limit ?? 200) || 200, 1000) }),
   }));
-  app.get("/api/audit/verify", async () => store.audit.verify());
+  app.get("/api/audit/verify", async () => deps.runtime().store.audit.verify());
 
   app.get("/api/scorecard", async (_req, reply) => {
     const card = deps.scorecard?.();
@@ -114,7 +119,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.post("/api/webhooks/paypal", async (req, reply) => {
     const raw = (req as FastifyRequest & { rawBody?: string }).rawBody ?? "";
     const headers = Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]));
-    const out = await firewall.handleWebhook(headers, raw);
+    const out = await deps.runtime().firewall.handleWebhook(headers, raw);
     return reply.code(out.status === "rejected" ? 400 : 200).send(out);
   });
 
