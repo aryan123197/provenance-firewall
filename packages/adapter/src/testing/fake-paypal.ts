@@ -26,6 +26,8 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
   const faults: Fault[] = [];
   const byRequestId = new Map<string, { status: number; json: unknown }>();
   const payouts: FakePayout[] = [];
+  const webhooks = new Map<string, { id: string; url: string; event_types: { name: string }[] }>();
+  let hookSeq = 0;
   const invoices = new Map<string, Record<string, unknown> & { status: string }>();
   let invoiceSeq = 0;
   const batches = new Map<string, { status: string; item: string }>();
@@ -56,6 +58,20 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
     if (fault === 401) return json(401, { name: "AUTHENTICATION_FAILURE" });
     if (fault && !loseResponse) return json(fault, { name: "FAULT" });
     if (headers.Authorization !== `Bearer ${validToken}`) return json(401, { name: "AUTHENTICATION_FAILURE" });
+
+    // ---- Notifications (webhook registration) ----
+    if (url.pathname === "/v1/notifications/webhooks" && init.method === "POST") {
+      const b = body as { url: string; event_types: { name: string }[] };
+      const id = `FAKEHOOK${++hookSeq}`;
+      webhooks.set(id, { id, url: b.url, event_types: b.event_types });
+      return json(201, webhooks.get(id));
+    }
+    if (url.pathname === "/v1/notifications/webhooks" && init.method === "GET") return json(200, { webhooks: [...webhooks.values()] });
+    const hookMatch = /^\/v1\/notifications\/webhooks\/([^/]+)$/.exec(url.pathname);
+    if (hookMatch && init.method === "DELETE") {
+      if (!webhooks.delete(hookMatch[1]!)) return json(404, { name: "INVALID_RESOURCE_ID" });
+      return new Response(null, { status: 204 });
+    }
 
     // ---- Invoicing v2 ----
     if (url.pathname === "/v2/invoicing/invoices" && init.method === "POST") {
@@ -112,6 +128,8 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
   return {
     fetch: fakeFetch,
     calls,
+    /** Webhooks registered with the fake Notifications API. */
+    webhooks,
     /** Invoices held by the fake Invoicing API, by id. Tests can edit one to simulate a vendor injecting text. */
     invoices,
     /** Payouts that actually exist on the fake PayPal, whether or not the caller saw the response. */

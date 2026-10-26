@@ -78,7 +78,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | Variable | Purpose |
 | --- | --- |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Sandbox app credentials. Their presence switches the server from simulated to sandbox. |
-| `PAYPAL_WEBHOOK_ID` | Id of the webhook you register for `/api/webhooks/paypal`, to verify signatures. |
+| `PAYPAL_WEBHOOK_ID` | Id of the webhook you register for `/api/webhooks/paypal`, to verify signatures. `pnpm register:webhook https://your-host/api/webhooks/paypal` registers it and prints the id. |
 | `PFW_DEMO_RECEIVER` | Email of a sandbox personal account, used by `pnpm e2e` as the registered vendor's account. |
 
 ### Server configuration
