@@ -78,8 +78,14 @@ export class PayPalHttp {
       throw new AdapterError(`PayPal request failed: ${e instanceof Error ? e.message : String(e)}`, true);
     }
     if (res.ok) return res;
-    const detail = (await res.text().catch(() => "")).slice(0, 300);
+    const raw = await res.text().catch(() => "");
+    let body: unknown = raw.slice(0, 2000);
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      /* not JSON: keep the text */
+    }
     const retryable = res.status >= 500 || res.status === 429 || res.status === 408;
-    throw new AdapterError(`PayPal ${res.status}: ${detail}`, retryable, res.status);
+    throw new AdapterError(`PayPal ${res.status}: ${raw.slice(0, 300)}`, retryable, res.status, body);
   }
 }

@@ -79,9 +79,15 @@ export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
 
   async execute(allowed: AllowedIntent): Promise<PaymentReceipt> {
     const proposal = this.propose(allowed);
-    const res = (await this.http.request("POST", "/v1/payments/payouts", proposal.request, { "PayPal-Request-Id": proposal.requestId })) as {
-      batch_header?: { payout_batch_id?: string; batch_status?: string };
-    };
+    let res: { batch_header?: { payout_batch_id?: string; batch_status?: string } };
+    try {
+      res = (await this.http.request("POST", "/v1/payments/payouts", proposal.request, { "PayPal-Request-Id": proposal.requestId })) as typeof res;
+    } catch (e) {
+      // A retry after a lost response must not be recorded as a failure when the payout actually went through.
+      const original = await this.originalPayout(e, proposal.requestId);
+      if (!original) throw e instanceof AdapterError && e.httpStatus === 409 ? new AdapterError(e.message, true, 409, e.body) : e;
+      res = { batch_header: { payout_batch_id: original.id, ...(original.status ? { batch_status: original.status } : {}) } };
+    }
     const reference = res.batch_header?.payout_batch_id;
     if (!reference) throw new AdapterError("PayPal response had no payout_batch_id", false);
     const { intent } = allowed;
@@ -96,6 +102,22 @@ export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
       receiver: intent.account.value,
       createdAt: new Date(this.http.now()).toISOString(),
     };
+  }
+
+  /**
+   * PayPal rejects a reused sender_batch_id with a link to the original payout. If a failed request carries such a link, and
+   * that payout really has our sender_batch_id, the earlier attempt succeeded and this is it. Anything else is a real error.
+   */
+  private async originalPayout(e: unknown, senderBatchId: string): Promise<{ id: string; status: string | undefined } | null> {
+    if (!(e instanceof AdapterError) || e.httpStatus === undefined || e.httpStatus < 400 || e.httpStatus >= 500) return null;
+    const links = (e.body as { links?: { href?: string }[] } | undefined)?.links ?? [];
+    for (const l of links) {
+      const id = /\/v1\/payments\/payouts\/([A-Za-z0-9]{6,40})(?:[/?#]|$)/.exec(l.href ?? "")?.[1];
+      if (!id) continue;
+      const got = (await this.http.request("GET", `/v1/payments/payouts/${id}`)) as { batch_header?: { batch_status?: string; sender_batch_header?: { sender_batch_id?: string } } } | undefined;
+      if (got?.batch_header?.sender_batch_header?.sender_batch_id === senderBatchId) return { id, status: got.batch_header.batch_status };
+    }
+    return null;
   }
 
   async status(reference: string): Promise<PaymentStatus> {

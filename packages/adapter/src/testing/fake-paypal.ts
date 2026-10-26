@@ -19,7 +19,10 @@ export interface FakePayout {
   requestId: string | undefined;
 }
 
-export function createFakePayPal(opts: { clientId?: string; clientSecret?: string } = {}) {
+export function createFakePayPal(opts: { clientId?: string; clientSecret?: string; duplicates?: "replay" | "reject" } = {}) {
+  // "replay": a repeated PayPal-Request-Id returns the original response. "reject": a reused sender_batch_id is refused with a
+  // link to the original payout, whatever the request id (the strict reading of PayPal's documentation).
+  const duplicates = opts.duplicates ?? "replay";
   const clientId = opts.clientId ?? "test-id";
   const clientSecret = opts.clientSecret ?? "test-secret";
   const calls: FakeCall[] = [];
@@ -30,7 +33,7 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
   let hookSeq = 0;
   const invoices = new Map<string, Record<string, unknown> & { status: string }>();
   let invoiceSeq = 0;
-  const batches = new Map<string, { status: string; item: string }>();
+  const batches = new Map<string, { status: string; item: string; senderBatchId: string }>();
   let validToken = "tok-1";
   let tokenSeq = 1;
   let batchSeq = 0;
@@ -101,7 +104,15 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
     }
     if (init.method === "POST" && url.pathname === "/v1/payments/payouts") {
       const rid = headers["PayPal-Request-Id"];
-      if (rid && byRequestId.has(rid)) {
+      const sbi = (body as { sender_batch_header?: { sender_batch_id?: string } }).sender_batch_header?.sender_batch_id;
+      if (duplicates === "reject" && sbi) {
+        const orig = [...batches.entries()].find(([, b]) => b.senderBatchId === sbi);
+        if (orig) {
+          if (loseResponse) throw new Error("socket hang up");
+          return json(400, { name: "USER_BUSINESS_ERROR", message: `Duplicate sender_batch_id ${sbi}`, links: [{ href: `${url.origin}/v1/payments/payouts/${orig[0]}`, rel: "self", method: "GET" }] });
+        }
+      }
+      if (duplicates === "replay" && rid && byRequestId.has(rid)) {
         const prior = byRequestId.get(rid)!;
         if (loseResponse) throw new Error("socket hang up");
         return json(prior.status, prior.json); // PayPal replays the original response for a repeated request id
@@ -109,7 +120,7 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
       const id = `FAKEBATCH${String(++batchSeq).padStart(4, "0")}`;
       const b = body as { items: { sender_item_id: string; receiver: string; amount: { value: string; currency: string } }[] };
       const item = b.items[0]!;
-      batches.set(id, { status: "PENDING", item: item.sender_item_id });
+      batches.set(id, { status: "PENDING", item: item.sender_item_id, senderBatchId: sbi ?? "" });
       payouts.push({ batchId: id, receiver: item.receiver, amount: parseMinorUnits(item.amount.value) ?? -1, currency: item.amount.currency, requestId: rid });
       const res = { batch_header: { payout_batch_id: id, batch_status: "PENDING" } };
       if (rid) byRequestId.set(rid, { status: 201, json: res });
@@ -120,7 +131,7 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
     if (init.method === "GET" && m) {
       const b = batches.get(m[1]!);
       if (!b) return json(404, { name: "RESOURCE_NOT_FOUND" });
-      return json(200, { batch_header: { payout_batch_id: m[1], batch_status: b.status }, items: [{ transaction_status: b.status }] });
+      return json(200, { batch_header: { payout_batch_id: m[1], batch_status: b.status, sender_batch_header: { sender_batch_id: b.senderBatchId } }, items: [{ transaction_status: b.status }] });
     }
     return json(404, { name: "NOT_FOUND" });
   }) as typeof fetch;
