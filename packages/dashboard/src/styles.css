@@ -291,3 +291,9 @@ textarea:disabled, input:disabled { opacity: 0.6; }
 .notices li.ok { background: var(--allow-bg); color: var(--allow); }
 .notices li.bad { background: var(--deny-bg); color: var(--deny); }
 .notices .link { color: inherit; font-weight: 500; }
+
+/* registry */
+.registry td, .registry th { font-size: 14px; }
+.form-title { margin: 20px 0 10px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.banner .check { margin-top: 8px; font-weight: 500; }

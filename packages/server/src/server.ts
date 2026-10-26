@@ -128,7 +128,7 @@ export function buildServer(cfg: ServerConfig): Server {
     openOperator: cfg.openOperator,
     scorecard: readCard,
     staticDir: cfg.staticDir,
-    extend: (a) => {
+    extend: (a, guard) => {
       if (!cfg.demo) return;
       registerDemo(a, {
         runtime: () => runtime,
@@ -138,7 +138,7 @@ export function buildServer(cfg: ServerConfig): Server {
           if (cfg.databasePath !== ":memory:") for (const suffix of ["", "-wal", "-shm"]) rmSync(cfg.databasePath + suffix, { force: true });
           runtime = createRuntime();
         },
-      });
+      }, guard);
     },
   });
 

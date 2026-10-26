@@ -16,7 +16,7 @@ import {
   type UnsupportedClause,
 } from "@pfw/core";
 import type { Firewall } from "@pfw/firewall";
-import { ApprovalStateError, PolicyConflictError, type Store } from "@pfw/store";
+import { ApprovalStateError, PolicyConflictError, RegistryError, type Store } from "@pfw/store";
 import { LlmRefusalError, type PolicyCompiler } from "@pfw/llm";
 import { z } from "zod";
 
@@ -47,7 +47,7 @@ export interface AppDeps {
   /** Directory of the built dashboard, served at `/`. */
   staticDir?: string;
   /** Extra routes, registered under /api (the demo agent lives here). */
-  extend?: (app: FastifyInstance) => void;
+  extend?: (app: FastifyInstance, guard: (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>) => void;
 }
 
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -123,6 +123,38 @@ export function createApp(deps: AppDeps): FastifyInstance {
     };
   app.post<{ Params: { id: string }; Body: { approver?: string; note?: string } }>("/api/approvals/:id/approve", { preHandler: requireOperator }, resolve(true));
   app.post<{ Params: { id: string }; Body: { approver?: string; note?: string } }>("/api/approvals/:id/reject", { preHandler: requireOperator }, resolve(false));
+
+  // ---- Vendor registry and purchase orders: the operator's trust anchor ----
+  app.get("/api/registry", async () => {
+    const { store } = deps.runtime();
+    return { vendors: store.listVendors(), purchaseOrders: store.listPurchaseOrders() };
+  });
+
+  const registryBody = z.object({ changedBy: z.string() });
+  app.post<{ Body: Record<string, unknown> }>("/api/registry/vendors", { preHandler: requireOperator }, async (req, reply) => {
+    const parsed = registryBody.extend({ id: z.string(), name: z.string(), account: z.string(), category: z.string() }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "id, name, account, category and changedBy are all required." });
+    const { changedBy, ...vendor } = parsed.data;
+    try {
+      return deps.runtime().store.changeVendor(vendor, changedBy);
+    } catch (e) {
+      if (e instanceof RegistryError) return reply.code(400).send({ error: e.message });
+      throw e;
+    }
+  });
+
+  app.post<{ Body: Record<string, unknown> }>("/api/registry/purchase-orders", { preHandler: requireOperator }, async (req, reply) => {
+    const parsed = registryBody.extend({ id: z.string(), vendorId: z.string(), amount: z.number(), currency: z.string() }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "id, vendorId, amount (in cents), currency and changedBy are all required." });
+    const { changedBy, ...po } = parsed.data;
+    try {
+      deps.runtime().store.changePurchaseOrder(po, changedBy);
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof RegistryError) return reply.code(400).send({ error: e.message });
+      throw e;
+    }
+  });
 
   app.get("/api/drift", async () => ({ drift: deps.runtime().store.listDrift() }));
 
@@ -237,7 +269,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
     return reply.code(out.status === "rejected" ? 400 : 200).send(out);
   });
 
-  deps.extend?.(app);
+  deps.extend?.(app, requireOperator);
 
   if (deps.staticDir && existsSync(deps.staticDir)) {
     void app.register(fastifyStatic, { root: deps.staticDir });

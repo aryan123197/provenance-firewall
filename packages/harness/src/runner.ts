@@ -109,7 +109,11 @@ export async function runOnFirewall(s: Scenario, agent: Agent, env: FirewalledEn
   const { store, firewall } = env;
   const prefix = env.keyPrefix ?? "";
   const vendors = registryFor(s);
-  for (const v of vendors) store.upsertVendor(v);
+  // Add what is missing, never overwrite: an operator's edits to the registry must survive a demo run.
+  const known = store.listVendors();
+  for (const v of vendors) {
+    if (!known.some((k) => k.id === v.id || k.name.toLowerCase() === v.name.toLowerCase())) store.upsertVendor(v);
+  }
   for (const p of s.purchaseOrders) store.addPurchaseOrder({ ...p, id: `${prefix}${p.id}` });
   const calls: PayCall[] = [];
   const receipts: PaymentReceipt[] = [];

@@ -3,6 +3,7 @@ import { api, operatorToken } from "./api";
 import { Activity } from "./screens/Activity";
 import { Approvals } from "./screens/Approvals";
 import { PolicyScreen } from "./screens/Policy";
+import { RegistryScreen } from "./screens/Registry";
 import { Replay } from "./screens/Replay";
 import { usePoll, useHashRoute } from "./hooks";
 import { shortHash } from "./labels";
@@ -10,6 +11,7 @@ import { shortHash } from "./labels";
 const TABS = [
   { to: "/activity", label: "Live activity" },
   { to: "/approvals", label: "Approvals" },
+  { to: "/registry", label: "Registry" },
   { to: "/policy", label: "Policy & scorecard" },
 ] as const;
 
@@ -68,6 +70,8 @@ export function App() {
           <Replay id={decodeURIComponent(decisionMatch[1]!)} back={() => go("/activity")} open={go} />
         ) : route === "/approvals" ? (
           <Approvals open={go} onChange={refresh} />
+        ) : route === "/registry" ? (
+          <RegistryScreen />
         ) : route === "/policy" ? (
           <PolicyScreen />
         ) : (

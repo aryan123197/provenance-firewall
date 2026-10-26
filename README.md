@@ -42,7 +42,7 @@ agent ──proposes (handles)──▶ firewall ──allow / needs approval / 
 | Provenance model, policy engine, idempotency, approvals, signed audit log, reconciliation | Implemented and tested (200+ tests, including property tests over tens of thousands of random intents) |
 | PayPal Payouts and Invoicing adapters | Implemented against PayPal's documented APIs and tested against an in-process fake (including an injected invoice read through the Invoicing client and run through both agents). **Neither has yet been run against the live PayPal sandbox**, and the Invoicing field names in particular are from the documentation, not confirmed against live responses. |
 | Red-team harness and scorecard | Runs offline. Agent is a deterministic stand-in; payments are an in-process fake. |
-| Dashboard (activity, decision replay, approvals, policy and scorecard) | Implemented |
+| Dashboard (activity, decision replay, approvals, registry, policy and scorecard) | Implemented. Operator actions need the operator token, entered in the header. |
 | Plain-English policy authoring (compile, diff, generated tests, confirm, versioned in the audit log) | Implemented and tested with a fake model. **Not yet run against the live Claude API.** |
 | Claude-driven procurement agent (`pnpm harness:llm`, and the demo toggle) | Implemented and tested with a fake model. **Not yet run against the live Claude API, so there are no published numbers for a real model.** |
 
@@ -109,7 +109,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | `packages/adapter` | `PaymentAdapter`, the authorization authority, the PayPal Payouts sandbox adapter, a fake PayPal for tests |
 | `packages/firewall` | Service that wires the above; the only path to PayPal |
 | `packages/server` | HTTP API, webhook endpoint, demo runner |
-| `packages/dashboard` | React + AG Grid operator dashboard |
+| `packages/dashboard` | React + AG Grid operator dashboard, including the vendor registry and purchase order screen |
 | `packages/llm` | Claude-backed procurement agent and plain-English policy compiler |
 | `packages/harness` | 24 attack and legitimate scenarios, baseline vs firewalled runner, scorecard |
 | `policies/` | Versioned policy files |

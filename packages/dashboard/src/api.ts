@@ -18,6 +18,27 @@ export interface Status {
   pendingApprovals: number;
 }
 
+export interface Vendor {
+  id: string;
+  name: string;
+  account: string;
+  category: string;
+}
+
+export interface PurchaseOrderRow {
+  id: string;
+  vendorId: string;
+  amount: number;
+  currency: string;
+  status: "open" | "closed";
+}
+
+export interface VendorChange {
+  before: Vendor | null;
+  after: Vendor;
+  accountChanged: boolean;
+}
+
 export interface PolicyTestResult {
   id: string;
   group: string;
@@ -151,6 +172,10 @@ export const api = {
   approvals: () => request<{ approvals: Approval[] }>("/api/approvals").then((r) => r.approvals),
   resolve: (id: string, approve: boolean, approver: string, note: string) =>
     post<ApprovalResult>(`/api/approvals/${encodeURIComponent(id)}/${approve ? "approve" : "reject"}`, { approver, note: note || undefined }),
+  registry: () => request<{ vendors: Vendor[]; purchaseOrders: PurchaseOrderRow[] }>("/api/registry"),
+  saveVendor: (v: Vendor, changedBy: string) => post<VendorChange>("/api/registry/vendors", { ...v, changedBy }),
+  addPurchaseOrder: (po: { id: string; vendorId: string; amount: number; currency: string }, changedBy: string) =>
+    post<{ ok: true }>("/api/registry/purchase-orders", { ...po, changedBy }),
   drift: () => request<{ drift: Drift[] }>("/api/drift").then((r) => r.drift),
   policy: () => request<PolicyView>("/api/policy"),
   compilePolicy: (english: string) => post<CompileResult>("/api/policy/compile", { english }),

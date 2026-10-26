@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { applyPatch, loadPolicy, tag, type OriginKind, type ResolvedIntent } from "@pfw/core";
-import { IdempotencyConflictError, PolicyConflictError, Store } from "./index";
+import { IdempotencyConflictError, PolicyConflictError, RegistryError, Store } from "./index";
 
 const policy = loadPolicy(readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8"));
 
@@ -266,6 +266,59 @@ describe("policy versions", () => {
     store.activatePolicy({ baseVersion: 2, doc: applyPatch(v2, { approvalThreshold: 30_000 }), confirmedBy: "dana" });
     const all = store.listPolicyVersions();
     expect(all.map((v) => [v.version, v.active])).toEqual([[3, true], [2, false]]);
+  });
+});
+
+describe("operator registry changes", () => {
+  const acme2 = { id: "acme", name: "Acme Supplies", account: "billing@acme.example", category: "office_supplies" };
+
+  test("adding a vendor is audited with who did it and is not flagged as an account change", () => {
+    const c = store.changeVendor({ id: "beta", name: "Beta Software", account: "beta@sandbox.example", category: "software" }, "dana@company.example");
+    expect(c).toMatchObject({ before: null, accountChanged: false });
+    expect(store.audit.entries().at(-1)).toMatchObject({ type: "vendor_changed", payload: { vendorId: "beta", changedBy: "dana@company.example", accountChanged: false } });
+  });
+  test("changing where an existing vendor is paid is flagged and recorded with both accounts", () => {
+    const c = store.changeVendor(acme2, "dana");
+    expect(c).toMatchObject({ accountChanged: true, before: { account: "acct_acme" }, after: { account: "billing@acme.example" } });
+    expect(store.audit.entries().at(-1)?.payload).toMatchObject({ accountChanged: true, before: { account: "acct_acme" }, after: { account: "billing@acme.example" } });
+  });
+  test("after an account change, the old account is a payee swap and the new one is the exact match", () => {
+    store.changeVendor(acme2, "dana");
+    expect(store.decide(intent({ idempotencyKey: "old" }), policy).decision).toMatchObject({ verdict: "deny", rule: "payee_change" });
+    const fresh = intent({ idempotencyKey: "new", account: f("vendor", "billing@acme.example") });
+    expect(store.decide(fresh, policy).decision.verdict).toBe("allow");
+  });
+  test.each([
+    ["no author", { ...acme2 }, "  ", /who/],
+    ["bad id", { ...acme2, id: "A B" }, "d", /vendor id/],
+    ["bad account", { ...acme2, account: "not an account" }, "d", /account/],
+    ["bad category", { ...acme2, category: "Office Supplies" }, "d", /category/],
+    ["padded name", { ...acme2, name: " Acme Supplies" }, "d", /spaces/],
+    ["empty name", { ...acme2, name: "" }, "d", /name/],
+  ])("rejects %s", (_n, v, by, msg) => {
+    expect(() => store.changeVendor(v, by)).toThrow(RegistryError);
+    expect(() => store.changeVendor(v, by)).toThrow(msg);
+  });
+  test("a different vendor cannot take an existing name, even with different casing", () => {
+    expect(() => store.changeVendor({ id: "imposter", name: "ACME SUPPLIES", account: "evil@x.example", category: "office_supplies" }, "d")).toThrow(/already has that name/);
+  });
+  test("a PayPal ID is accepted as an account", () => {
+    expect(() => store.changeVendor({ id: "pid", name: "PayPal ID Co", account: "ABCDEFGHIJKLM", category: "software" }, "d")).not.toThrow();
+  });
+  test("purchase orders are validated, attributed and listed with their status", () => {
+    store.changePurchaseOrder({ id: "po-1", vendorId: "acme", amount: 45_000, currency: "USD" }, "dana");
+    expect(store.listPurchaseOrders()).toEqual([{ id: "po-1", vendorId: "acme", amount: 45_000, currency: "USD", status: "open" }]);
+    expect(store.audit.entries().at(-1)).toMatchObject({ type: "purchase_order_added", payload: { changedBy: "dana" } });
+    for (const bad of [{ id: "po-1", vendorId: "acme", amount: 1, currency: "USD" }, { id: "po-2", vendorId: "ghost", amount: 1, currency: "USD" }, { id: "po-3", vendorId: "acme", amount: -5, currency: "USD" }, { id: "po-4", vendorId: "acme", amount: 1.5, currency: "USD" }, { id: "po-5", vendorId: "acme", amount: 1, currency: "usd" }]) {
+      expect(() => store.changePurchaseOrder(bad, "d")).toThrow(RegistryError);
+    }
+    expect(store.listPurchaseOrders()).toHaveLength(1);
+  });
+  test("rejected changes leave no audit entry", () => {
+    const before = store.audit.entries().length;
+    expect(() => store.changeVendor({ ...acme2, account: "bad" }, "d")).toThrow();
+    expect(store.audit.entries()).toHaveLength(before);
+    expect(store.audit.verify().ok).toBe(true);
   });
 });
 

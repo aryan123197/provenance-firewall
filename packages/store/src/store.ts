@@ -147,6 +147,28 @@ export interface PolicyVersionRecord {
   active: boolean;
 }
 
+export class RegistryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RegistryError";
+  }
+}
+
+export interface PurchaseOrderRecord extends PurchaseOrder {
+  status: "open" | "closed";
+}
+
+export interface VendorChange {
+  before: VendorRecord | null;
+  after: VendorRecord;
+  /** True when an existing vendor now pays into a different account. This is the payee-swap moment. */
+  accountChanged: boolean;
+}
+
+const VENDOR_ID = /^[a-z0-9][a-z0-9_-]{1,40}$/;
+const CATEGORY = /^[a-z][a-z0-9_]{1,40}$/;
+const ACCOUNT = /^(?:[^\s@]+@[^\s@]+\.[^\s@]+|[A-Z0-9]{13})$/;
+
 export interface StoreOptions {
   path?: string;
   clock?: () => Date;
@@ -251,6 +273,47 @@ export class Store {
          ON CONFLICT(id) DO UPDATE SET name = excluded.name, account = excluded.account, category = excluded.category`,
       )
       .run(v);
+  }
+
+  /**
+   * The operator's way to add or edit a vendor. Unlike `upsertVendor` (used for seeding), this validates, names who did it,
+   * and writes the before and after to the audit log. Changing where an existing vendor is paid is flagged, because that is
+   * exactly what a payee swap tries to achieve.
+   */
+  changeVendor(v: VendorRecord, changedBy: string): VendorChange {
+    return this.db.transaction((): VendorChange => {
+      if (!changedBy.trim()) throw new RegistryError("say who is making this change");
+      if (!VENDOR_ID.test(v.id)) throw new RegistryError("the vendor id must be 2-41 characters: lowercase letters, digits, - or _");
+      if (!v.name.trim() || v.name.length > 120 || v.name !== v.name.trim()) throw new RegistryError("the vendor name must be 1-120 characters with no leading or trailing spaces");
+      if (!ACCOUNT.test(v.account) || v.account.length > 254) throw new RegistryError("the account must be a PayPal email address or a 13-character PayPal ID");
+      if (!CATEGORY.test(v.category)) throw new RegistryError("the category must be lowercase letters, digits or _");
+      const clash = this.db.prepare("SELECT id FROM vendors WHERE lower(name) = lower(?) AND id <> ?").get(v.name, v.id) as { id: string } | undefined;
+      if (clash) throw new RegistryError(`another vendor (${clash.id}) already has that name`);
+      const before = (this.db.prepare("SELECT id, name, account, category FROM vendors WHERE id = ?").get(v.id) as VendorRow | undefined) ?? null;
+      this.upsertVendor(v);
+      const accountChanged = before !== null && before.account !== v.account;
+      this.audit.append("vendor_changed", { vendorId: v.id, changedBy: changedBy.trim(), before, after: v, accountChanged });
+      return { before, after: v, accountChanged };
+    }).immediate();
+  }
+
+  /** Records a purchase order the operator approved, with who added it. */
+  changePurchaseOrder(po: PurchaseOrder, changedBy: string): void {
+    this.db.transaction(() => {
+      if (!changedBy.trim()) throw new RegistryError("say who is making this change");
+      if (!VENDOR_ID.test(po.id)) throw new RegistryError("the purchase order id must be 2-41 characters: lowercase letters, digits, - or _");
+      if (!this.db.prepare("SELECT 1 FROM vendors WHERE id = ?").get(po.vendorId)) throw new RegistryError(`unknown vendor ${po.vendorId}`);
+      if (!Number.isSafeInteger(po.amount) || po.amount < 0) throw new RegistryError("the amount must be a non-negative whole number of cents");
+      if (!/^[A-Z]{3}$/.test(po.currency)) throw new RegistryError("the currency must be a 3-letter code");
+      if (this.db.prepare("SELECT 1 FROM purchase_orders WHERE id = ?").get(po.id)) throw new RegistryError(`purchase order ${po.id} already exists`);
+      this.addPurchaseOrder(po);
+      this.audit.append("purchase_order_added", { purchaseOrder: po, changedBy: changedBy.trim() });
+    }).immediate();
+  }
+
+  listPurchaseOrders(): PurchaseOrderRecord[] {
+    const rows = this.db.prepare("SELECT id, vendor_id, amount, currency, status FROM purchase_orders ORDER BY rowid DESC").all() as (PoRow & { status: "open" | "closed" })[];
+    return rows.map((r) => ({ id: r.id, vendorId: r.vendor_id, amount: r.amount, currency: r.currency, status: r.status }));
   }
 
   listVendors(): VendorRecord[] {

@@ -145,20 +145,67 @@ describe("activate", () => {
   });
 });
 
+describe("registry endpoints", () => {
+  const vendor = { id: "gamma", name: "Gamma Consulting", account: "gamma@sandbox.example", category: "contractors", changedBy: "dana@company.example" };
+  const post = (url: string, payload: Record<string, unknown>, headers: Record<string, string> = op) => server.app.inject({ method: "POST", url, headers, payload });
+
+  test("reading is open; writing needs the operator token", async () => {
+    expect((await server.app.inject({ url: "/api/registry" })).statusCode).toBe(200);
+    expect((await post("/api/registry/vendors", vendor, {})).statusCode).toBe(401);
+    expect((await post("/api/registry/purchase-orders", { id: "po-1", vendorId: "gamma", amount: 1, currency: "USD", changedBy: "d" }, {})).statusCode).toBe(401);
+  });
+  test("adding a vendor and an order shows up in the registry and the audit log", async () => {
+    expect((await post("/api/registry/vendors", vendor)).json()).toMatchObject({ accountChanged: false, after: { id: "gamma" } });
+    expect((await post("/api/registry/purchase-orders", { id: "po-g1", vendorId: "gamma", amount: 25_000, currency: "USD", changedBy: "dana" })).statusCode).toBe(200);
+    const reg = (await server.app.inject({ url: "/api/registry" })).json() as { vendors: { id: string }[]; purchaseOrders: { id: string; status: string }[] };
+    expect(reg.vendors.map((v) => v.id)).toContain("gamma");
+    expect(reg.purchaseOrders[0]).toMatchObject({ id: "po-g1", status: "open" });
+    const types = ((await server.app.inject({ url: "/api/audit" })).json() as { entries: { type: string }[] }).entries.map((e) => e.type);
+    expect(types).toEqual(["vendor_changed", "purchase_order_added"]);
+  });
+  test("an account change is reported as such", async () => {
+    await post("/api/registry/vendors", vendor);
+    const r = await post("/api/registry/vendors", { ...vendor, account: "gamma-new@sandbox.example" });
+    expect(r.json()).toMatchObject({ accountChanged: true, before: { account: "gamma@sandbox.example" } });
+  });
+  test("invalid input is a 400 with the reason, and missing fields too", async () => {
+    const bad = await post("/api/registry/vendors", { ...vendor, account: "nope" });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toMatchObject({ error: expect.stringContaining("account") });
+    expect((await post("/api/registry/vendors", { id: "x" })).statusCode).toBe(400);
+    expect((await post("/api/registry/purchase-orders", { id: "po-z", vendorId: "ghost", amount: 1, currency: "USD", changedBy: "d" })).statusCode).toBe(400);
+  });
+});
+
+describe("demo routes need the operator token unless the server is in open demo mode", () => {
+  test("run and reset are refused without it and work with it", async () => {
+    const d = build({ demo: true });
+    expect((await d.app.inject({ method: "POST", url: "/api/demo/run", payload: { scenarioId: "legit-po-match" } })).statusCode).toBe(401);
+    expect((await d.app.inject({ method: "POST", url: "/api/demo/reset" })).statusCode).toBe(401);
+    expect((await d.app.inject({ method: "POST", url: "/api/demo/run", headers: { authorization: "Bearer wrong" }, payload: { scenarioId: "legit-po-match" } })).statusCode).toBe(401);
+    expect(((await d.app.inject({ url: "/api/decisions" })).json() as { decisions: unknown[] }).decisions).toHaveLength(0);
+    expect((await d.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match" } })).statusCode).toBe(200);
+    expect((await d.app.inject({ method: "POST", url: "/api/demo/reset", headers: op })).statusCode).toBe(200);
+  });
+  test("listing scenarios stays public", async () => {
+    expect((await build({ demo: true }).app.inject({ url: "/api/demo/scenarios" })).statusCode).toBe(200);
+  });
+});
+
 describe("demo runner with a live agent", () => {
   const live: Agent = { name: "fake-llm", kind: "llm", run: async () => undefined };
 
   test("agent: llm is refused when no key is configured, and allowed when one is", async () => {
     const noKey = build({ demo: true });
-    expect((await noKey.app.inject({ method: "POST", url: "/api/demo/run", payload: { scenarioId: "legit-po-match", agent: "llm" } })).statusCode).toBe(503);
+    expect((await noKey.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match", agent: "llm" } })).statusCode).toBe(503);
     const withKey = build({ demo: true, llmAgent: live });
-    const r = await withKey.app.inject({ method: "POST", url: "/api/demo/run", payload: { scenarioId: "legit-po-match", agent: "llm" } });
+    const r = await withKey.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match", agent: "llm" } });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ agent: "fake-llm", agentKind: "llm" });
     expect((await withKey.app.inject({ url: "/api/status" })).json()).toMatchObject({ llmAgentAvailable: true });
   });
   test("the scripted agent stays the default", async () => {
     const d = build({ demo: true });
-    expect((await d.app.inject({ method: "POST", url: "/api/demo/run", payload: { scenarioId: "legit-po-match" } })).json()).toMatchObject({ agent: "gullible-scripted", agentKind: "scripted" });
+    expect((await d.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match" } })).json()).toMatchObject({ agent: "gullible-scripted", agentKind: "scripted" });
   });
 });

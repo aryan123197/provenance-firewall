@@ -1,6 +1,9 @@
 export {
   Store,
   IdempotencyConflictError,
+  RegistryError,
+  type PurchaseOrderRecord,
+  type VendorChange,
   PolicyConflictError,
   type PolicyVersionRecord,
   ApprovalStateError,

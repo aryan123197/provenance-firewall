@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   GullibleAgent,
   runBaseline,
@@ -19,10 +19,11 @@ export interface DemoDeps {
 }
 
 /**
- * Demo routes: run a harness scenario against the unprotected baseline (simulated PayPal, so no real money can move)
+ * Demo routes (running a scenario moves money through the live firewall, and reset wipes history, so both need the operator token
+ * unless the server is in open demo mode): run a harness scenario against the unprotected baseline (simulated PayPal, so no real money can move)
  * and against this server's live firewall, side by side. Approvals stay pending for a person to act on in the inbox.
  */
-export function registerDemo(app: FastifyInstance, deps: DemoDeps): void {
+export function registerDemo(app: FastifyInstance, deps: DemoDeps, guard: (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>): void {
   let runCount = 0;
   let busy: Promise<unknown> = Promise.resolve();
 
@@ -30,7 +31,7 @@ export function registerDemo(app: FastifyInstance, deps: DemoDeps): void {
     scenarios: SCENARIOS.map((s) => ({ id: s.id, category: s.category, kind: s.kind, title: s.title, description: s.description, request: s.request })),
   }));
 
-  app.post<{ Body: { scenarioId?: string; agent?: "scripted" | "llm"; request?: string } }>("/api/demo/run", async (req, reply) => {
+  app.post<{ Body: { scenarioId?: string; agent?: "scripted" | "llm"; request?: string } }>("/api/demo/run", { preHandler: guard }, async (req, reply) => {
     const found = SCENARIOS.find((s) => s.id === req.body?.scenarioId);
     if (!found) return reply.code(404).send({ error: "unknown scenario" });
     if (req.body?.agent === "llm" && !deps.llmAgent) return reply.code(503).send({ error: "A live Claude agent needs a Claude API key (ANTHROPIC_API_KEY) on the server." });
@@ -64,7 +65,7 @@ export function registerDemo(app: FastifyInstance, deps: DemoDeps): void {
   });
 
   if (deps.reset) {
-    app.post("/api/demo/reset", async () => {
+    app.post("/api/demo/reset", { preHandler: guard }, async () => {
       await busy;
       deps.reset!();
       runCount = 0;
