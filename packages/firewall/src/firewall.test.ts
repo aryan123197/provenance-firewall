@@ -287,6 +287,32 @@ describe("webhook reconciliation", () => {
     const bare = new Firewall({ store, adapter: new PayPalAdapter({ clientId: "a", clientSecret: "b", authority, baseUrl: "http://localhost:1" }), authority, policy });
     expect(await bare.handleWebhook(fakeWebhookHeaders(), "{}")).toMatchObject({ status: "rejected" });
   });
+  test("a verifier that throws, or a verified body that is not JSON, is rejected without touching any record", async () => {
+    const before = store.audit.entries().length;
+    const throwing = new Firewall({ store, adapter: new PayPalAdapter({ clientId: "a", clientSecret: "b", authority, baseUrl: "http://localhost:1" }), authority, policy, webhooks: { verify: async () => { throw new Error("PayPal unreachable"); } } });
+    expect(await throwing.handleWebhook(fakeWebhookHeaders(), "{}")).toEqual({ status: "rejected", reason: "signature could not be verified" });
+    const accepting = new Firewall({ store, adapter: new PayPalAdapter({ clientId: "a", clientSecret: "b", authority, baseUrl: "http://localhost:1" }), authority, policy, webhooks: { verify: async () => true } });
+    expect(await accepting.handleWebhook(fakeWebhookHeaders(), "not json")).toEqual({ status: "rejected", reason: "body is not JSON" });
+    expect(store.audit.entries()).toHaveLength(before);
+  });
+  test("header names are matched case-insensitively", async () => {
+    const r = await pay();
+    const upper = Object.fromEntries(Object.entries(fakeWebhookHeaders()).map(([k, v]) => [k.toUpperCase(), v]));
+    expect(await fw.handleWebhook(upper, itemEvent({ batch: r.reference }))).toMatchObject({ status: "processed", result: "matched" });
+  });
+  test("a different currency than authorized is drift", async () => {
+    const r = await pay();
+    const body = JSON.stringify({ id: "WH-CUR", event_type: "PAYMENT.PAYOUTS-ITEM.SUCCEEDED", resource: { payout_batch_id: r.reference, transaction_status: "SUCCESS", payout_item: { receiver: "acme@sandbox.example", amount: { value: "45.00", currency: "EUR" } } } });
+    expect(await hook(body)).toMatchObject({ result: "drift", kind: "detail_mismatch" });
+    expect((store.listDrift("open")[0]!.detail as { mismatches: string[] }).mismatches[0]).toMatch(/currency EUR/);
+  });
+  test("a returned payment outranks success, and a later success does not undo it", async () => {
+    const r = await pay();
+    await hook(itemEvent({ id: "s", batch: r.reference, status: "SUCCESS" }));
+    await hook(itemEvent({ id: "r", batch: r.reference, status: "RETURNED", type: "PAYMENT.PAYOUTS-ITEM.RETURNED" }));
+    await hook(itemEvent({ id: "s2", batch: r.reference, status: "SUCCESS" }));
+    expect(store.getExecution("pay-1")?.providerStatus).toBe("returned");
+  });
   test("unrelated event types are ignored", async () => {
     expect(await hook(JSON.stringify({ id: "WH-X", event_type: "CUSTOMER.DISPUTE.CREATED", resource: {} }))).toEqual({ status: "ignored" });
   });

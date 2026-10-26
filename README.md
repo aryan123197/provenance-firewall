@@ -120,7 +120,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 
 ## Tests
 
-`pnpm check` runs the typecheck and every test: unit tests for each rule and boundary, property-based safety tests for the engine, adapter tests against a fake PayPal (including forged authorizations, token refresh, timeouts and replayed request ids), store tests for idempotency and the audit chain (including tampering with triggers dropped), firewall and server tests, and the harness tests that pin every scenario's intent.
+`pnpm check` runs the typecheck and every test (`pnpm coverage` adds a coverage report with a floor that CI enforces; about 99% of lines are covered today): unit tests for each rule and boundary, property-based safety tests for the engine, adapter tests against a fake PayPal (including forged authorizations, token refresh, timeouts and replayed request ids), store tests for idempotency and the audit chain (including tampering with triggers dropped), firewall and server tests, and the harness tests that pin every scenario's intent.
 
 ## License
 
