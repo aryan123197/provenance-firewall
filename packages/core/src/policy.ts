@@ -18,6 +18,10 @@ export const PolicySchema = z
     limits: z.object({ perPayment: Minor, perVendorPerDay: Minor, totalPerDay: Minor }).strict(),
     allowedCategories: z.array(z.string().min(1)).min(1),
     velocity: z.object({ maxPerHour: z.number().int().positive() }).strict(),
+    /** Overrides `approvalThreshold` for a vendor category, e.g. contractors above $500 need approval. */
+    categoryApprovalThresholds: z.record(z.string().min(1), Minor).default({}),
+    /** UTC weekdays (0 = Sunday ... 6 = Saturday) on which a new payee is denied outright instead of held for approval. */
+    newPayeeDenyDays: z.array(z.number().int().min(0).max(6)).default([]),
   })
   .strict();
 

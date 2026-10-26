@@ -5,3 +5,5 @@ export * from "./context";
 export * from "./intent";
 export * from "./policy";
 export * from "./engine";
+export * from "./policy-edit";
+export * from "./policy-tests";

@@ -14,3 +14,7 @@ allowedCategories:
   - contractors
 velocity:
   maxPerHour: 5
+# Optional. A category-specific approval threshold overrides approvalThreshold for that vendor category.
+categoryApprovalThresholds: {}
+# Optional. UTC weekdays (0 = Sunday ... 6 = Saturday) on which a new payee is denied outright.
+newPayeeDenyDays: []

@@ -144,6 +144,44 @@ describe("limits and thresholds", () => {
   });
 });
 
+describe("category thresholds and weekday rule", () => {
+  const custom = (o: Partial<typeof policy>) => ({ ...policy, ...o });
+  const contractor: VendorRecord = { id: "c", name: "Casey Contracting", account: "acct_casey", category: "contractors" };
+  const ci = (amount: number) => intent({ payee: f("vendor", contractor.name), account: f("vendor", contractor.account), amount: f("user", amount), category: f("vendor", "contractors") });
+  const cs = (o: Partial<PolicyState> = {}) => state({ vendors: [acme, contractor], ...o });
+
+  test("a category override replaces the global threshold for that category only", () => {
+    const p = custom({ categoryApprovalThresholds: { contractors: 20_000 } });
+    expect(evaluate(ci(20_000), p, cs()).verdict).toBe("allow");
+    expect(evaluate(ci(20_001), p, cs())).toMatchObject({ verdict: "require_approval", rule: "approval_threshold" });
+    expect(evaluate(intent({ amount: f("user", 20_001) }), p, cs()).verdict).toBe("allow"); // office supplies keep the $500 default
+  });
+  test("an override above the global threshold lets that category pay more without approval", () => {
+    const p = custom({ categoryApprovalThresholds: { contractors: 90_000 } });
+    expect(evaluate(ci(60_000), p, cs()).verdict).toBe("allow");
+  });
+  test("the override follows the vendor's category on file, not the one claimed", () => {
+    const p = custom({ categoryApprovalThresholds: { contractors: 20_000 } });
+    const claimed = ci(30_000);
+    expect(evaluate({ ...claimed, category: f("literal", "office_supplies") }, p, cs()).rule).toBe("approval_threshold");
+  });
+  test.each([
+    [0, "deny"], // Sunday
+    [6, "deny"], // Saturday
+    [2, "require_approval"], // Tuesday
+  ])("a new payee on UTC weekday %i is %s when weekends are blocked", (day, verdict) => {
+    const p = custom({ newPayeeDenyDays: [0, 6] });
+    const when = new Date(Date.UTC(2026, 10, 1 + day, 12)).toISOString();
+    const d = evaluate(intent({ payee: f("user", "Fresh"), account: f("user", "acct_fresh"), amount: f("user", 100) }), p, state({ now: when }));
+    expect(d.verdict).toBe(verdict);
+    expect(d.rule).toBe("new_payee");
+  });
+  test("the weekday rule does not touch registered vendors", () => {
+    const p = custom({ newPayeeDenyDays: [0, 1, 2, 3, 4, 5, 6] });
+    expect(evaluate(intent(), p, state()).verdict).toBe("allow");
+  });
+});
+
 describe("allowlist and velocity", () => {
   test("registered vendor in a disallowed category is denied", () => {
     const d = run(

@@ -94,7 +94,11 @@ export function evaluate(intent: ResolvedIntent, policy: Policy, state: PolicySt
     const from = !isTrusted(payee.trust) ? "payee" : "account";
     add("untrusted_payee", "deny", `The ${from} came from untrusted content, not a trusted record, and does not match any registered vendor.`);
   } else if (!exact) {
-    add("new_payee", "require_approval", `"${payee.value}" is not a registered vendor. A person must confirm a new payee.`);
+    if (policy.newPayeeDenyDays.includes(new Date(state.now).getUTCDay())) {
+      add("new_payee", "deny", `"${payee.value}" is not a registered vendor, and new payees are not paid on this day of the week.`);
+    } else {
+      add("new_payee", "require_approval", `"${payee.value}" is not a registered vendor. A person must confirm a new payee.`);
+    }
   }
 
   const vendor = exact ?? null;
@@ -115,8 +119,17 @@ export function evaluate(intent: ResolvedIntent, policy: Policy, state: PolicySt
     }
   }
 
-  if (amount.value > policy.approvalThreshold) {
-    add("approval_threshold", "require_approval", `${money(amount.value, cur)} is above the ${money(policy.approvalThreshold, cur)} approval threshold.`);
+  // The vendor's category on file decides, not the category the agent or an invoice claims.
+  const effectiveCategory = vendor ? vendor.category : category.value;
+  const threshold = policy.categoryApprovalThresholds[effectiveCategory] ?? policy.approvalThreshold;
+  if (amount.value > threshold) {
+    add(
+      "approval_threshold",
+      "require_approval",
+      policy.categoryApprovalThresholds[effectiveCategory] !== undefined
+        ? `${money(amount.value, cur)} is above the ${money(threshold, cur)} approval threshold for ${effectiveCategory}.`
+        : `${money(amount.value, cur)} is above the ${money(threshold, cur)} approval threshold.`,
+    );
   }
 
   if (amount.value > policy.limits.perPayment) {
@@ -132,8 +145,6 @@ export function evaluate(intent: ResolvedIntent, policy: Policy, state: PolicySt
     add("hard_limit", "deny", `This would take today's total past the ${money(policy.limits.totalPerDay, cur)} daily limit.`);
   }
 
-  // The vendor's category on file decides, not the category the agent or an invoice claims.
-  const effectiveCategory = vendor ? vendor.category : category.value;
   if (!policy.allowedCategories.includes(effectiveCategory)) {
     add("allowlist", "deny", `Category "${effectiveCategory}" is not on the allowlist.`);
   }
