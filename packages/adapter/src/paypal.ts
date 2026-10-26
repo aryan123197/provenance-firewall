@@ -2,19 +2,11 @@ import { createHash } from "node:crypto";
 import type { Authority, AllowedIntent } from "./authority";
 import { formatAmount } from "./money";
 import { parseMinorUnits, type ProviderEvent, type WebhookVerifier } from "./webhook";
+import { PayPalHttp, type PayPalHttpConfig } from "./paypal-http";
 import { AdapterError, type PaymentAdapter, type PaymentProposal, type PaymentReceipt, type PaymentStatus } from "./types";
 
-export const PAYPAL_SANDBOX_URL = "https://api-m.sandbox.paypal.com";
-
-export interface PayPalConfig {
-  clientId: string;
-  clientSecret: string;
+export interface PayPalConfig extends PayPalHttpConfig {
   authority: Authority;
-  /** Sandbox only. Anything that is not a sandbox or local host is refused. */
-  baseUrl?: string;
-  fetch?: typeof fetch;
-  timeoutMs?: number;
-  now?: () => number;
   /** The webhook id PayPal assigns when you register the endpoint. Needed only for `verify`. */
   webhookId?: string;
 }
@@ -59,21 +51,10 @@ export function mapPayPalStatus(s: string | undefined): PaymentStatus {
 
 /** PayPal Payouts (sandbox). The account on a payment is the receiver's PayPal email or PayPal ID. */
 export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
-  private readonly base: string;
-  private readonly f: typeof fetch;
-  private readonly now: () => number;
-  private readonly timeoutMs: number;
-  private token: { value: string; expiresAt: number } | null = null;
+  private readonly http: PayPalHttp;
 
   constructor(private readonly cfg: PayPalConfig) {
-    this.base = (cfg.baseUrl ?? PAYPAL_SANDBOX_URL).replace(/\/$/, "");
-    const host = new URL(this.base).hostname;
-    if (!host.includes("sandbox") && host !== "localhost" && host !== "127.0.0.1") {
-      throw new Error(`refusing non-sandbox PayPal host: ${host}`);
-    }
-    this.f = cfg.fetch ?? fetch;
-    this.now = cfg.now ?? Date.now;
-    this.timeoutMs = cfg.timeoutMs ?? 15_000;
+    this.http = new PayPalHttp(cfg);
   }
 
   propose(allowed: AllowedIntent): PaymentProposal {
@@ -98,7 +79,7 @@ export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
 
   async execute(allowed: AllowedIntent): Promise<PaymentReceipt> {
     const proposal = this.propose(allowed);
-    const res = (await this.call("POST", "/v1/payments/payouts", proposal.request, { "PayPal-Request-Id": proposal.requestId })) as {
+    const res = (await this.http.request("POST", "/v1/payments/payouts", proposal.request, { "PayPal-Request-Id": proposal.requestId })) as {
       batch_header?: { payout_batch_id?: string; batch_status?: string };
     };
     const reference = res.batch_header?.payout_batch_id;
@@ -113,12 +94,12 @@ export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
       amount: intent.amount.value,
       currency: intent.currency.value,
       receiver: intent.account.value,
-      createdAt: new Date(this.now()).toISOString(),
+      createdAt: new Date(this.http.now()).toISOString(),
     };
   }
 
   async status(reference: string): Promise<PaymentStatus> {
-    const res = (await this.call("GET", `/v1/payments/payouts/${encodeURIComponent(reference)}`)) as {
+    const res = (await this.http.request("GET", `/v1/payments/payouts/${encodeURIComponent(reference)}`)) as {
       batch_header?: { batch_status?: string };
       items?: { transaction_status?: string }[];
     };
@@ -137,7 +118,7 @@ export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
     } catch {
       return false;
     }
-    const res = (await this.call("POST", "/v1/notifications/verify-webhook-signature", {
+    const res = (await this.http.request("POST", "/v1/notifications/verify-webhook-signature", {
       auth_algo: h("paypal-auth-algo"),
       cert_url: h("paypal-cert-url"),
       transmission_id: h("paypal-transmission-id"),
@@ -147,52 +128,6 @@ export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
       webhook_event: event,
     })) as { verification_status?: string };
     return res.verification_status === "SUCCESS";
-  }
-
-  private async accessToken(): Promise<string> {
-    if (this.token && this.token.expiresAt > this.now() + 30_000) return this.token.value;
-    const basic = Buffer.from(`${this.cfg.clientId}:${this.cfg.clientSecret}`).toString("base64");
-    const res = await this.send(`${this.base}/v1/oauth2/token`, {
-      method: "POST",
-      headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded" },
-      body: "grant_type=client_credentials",
-    });
-    const json = (await res.json()) as { access_token?: string; expires_in?: number };
-    if (!json.access_token) throw new AdapterError("PayPal token response had no access_token", false);
-    this.token = { value: json.access_token, expiresAt: this.now() + (json.expires_in ?? 300) * 1000 };
-    return this.token.value;
-  }
-
-  private async call(method: string, path: string, body?: unknown, headers: Record<string, string> = {}, retryAuth = true): Promise<unknown> {
-    const token = await this.accessToken();
-    try {
-      const res = await this.send(`${this.base}${path}`, {
-        method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...headers },
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      });
-      return await res.json();
-    } catch (e) {
-      if (e instanceof AdapterError && e.httpStatus === 401 && retryAuth) {
-        this.token = null;
-        return this.call(method, path, body, headers, false);
-      }
-      throw e;
-    }
-  }
-
-  private async send(url: string, init: RequestInit): Promise<Response> {
-    let res: Response;
-    try {
-      res = await this.f(url, { ...init, signal: AbortSignal.timeout(this.timeoutMs) });
-    } catch (e) {
-      // Outcome unknown (timeout, reset): safe to retry because the request id is stable.
-      throw new AdapterError(`PayPal request failed: ${e instanceof Error ? e.message : String(e)}`, true);
-    }
-    if (res.ok) return res;
-    const detail = (await res.text().catch(() => "")).slice(0, 300);
-    const retryable = res.status >= 500 || res.status === 429 || res.status === 408;
-    throw new AdapterError(`PayPal ${res.status}: ${detail}`, retryable, res.status);
   }
 }
 

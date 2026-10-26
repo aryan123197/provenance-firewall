@@ -26,6 +26,8 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
   const faults: Fault[] = [];
   const byRequestId = new Map<string, { status: number; json: unknown }>();
   const payouts: FakePayout[] = [];
+  const invoices = new Map<string, Record<string, unknown> & { status: string }>();
+  let invoiceSeq = 0;
   const batches = new Map<string, { status: string; item: string }>();
   let validToken = "tok-1";
   let tokenSeq = 1;
@@ -54,6 +56,28 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
     if (fault === 401) return json(401, { name: "AUTHENTICATION_FAILURE" });
     if (fault && !loseResponse) return json(fault, { name: "FAULT" });
     if (headers.Authorization !== `Bearer ${validToken}`) return json(401, { name: "AUTHENTICATION_FAILURE" });
+
+    // ---- Invoicing v2 ----
+    if (url.pathname === "/v2/invoicing/invoices" && init.method === "POST") {
+      const id = `INV2-FAKE-${String(++invoiceSeq).padStart(4, "0")}-TEST`;
+      const b = body as { detail: Record<string, unknown>; invoicer: Record<string, unknown>; primary_recipients: unknown[]; items: { unit_amount: { currency_code: string; value: string } }[] };
+      const sum = b.items.reduce((a, i) => a + Number(i.unit_amount.value), 0);
+      invoices.set(id, { id, status: "DRAFT", detail: b.detail, invoicer: b.invoicer, primary_recipients: b.primary_recipients, items: b.items, amount: { currency_code: b.items[0]?.unit_amount.currency_code ?? "USD", value: sum.toFixed(2) } });
+      return json(201, { rel: "self", href: `${url.origin}/v2/invoicing/invoices/${id}`, method: "GET" });
+    }
+    if (url.pathname === "/v2/invoicing/invoices" && init.method === "GET") {
+      return json(200, { total_items: invoices.size, items: [...invoices.values()] });
+    }
+    const invMatch = /^\/v2\/invoicing\/invoices\/([^/]+)(\/send)?$/.exec(url.pathname);
+    if (invMatch) {
+      const inv = invoices.get(invMatch[1]!);
+      if (!inv) return json(404, { name: "RESOURCE_NOT_FOUND" });
+      if (invMatch[2] && init.method === "POST") {
+        inv.status = "SENT";
+        return new Response(null, { status: 202 });
+      }
+      if (init.method === "GET") return json(200, inv);
+    }
 
     if (init.method === "POST" && url.pathname === "/v1/notifications/verify-webhook-signature") {
       const b = body as { transmission_sig?: string; webhook_id?: string };
@@ -88,6 +112,8 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
   return {
     fetch: fakeFetch,
     calls,
+    /** Invoices held by the fake Invoicing API, by id. Tests can edit one to simulate a vendor injecting text. */
+    invoices,
     /** Payouts that actually exist on the fake PayPal, whether or not the caller saw the response. */
     payouts,
     /** Queue a failure for the next non-token request. */

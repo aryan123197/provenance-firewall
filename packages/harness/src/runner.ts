@@ -31,6 +31,12 @@ export interface RunResult {
   pendingApprovals: number;
 }
 
+/** The standard fixture vendors, except any the scenario replaces by id or name. */
+export function registryFor(s: Scenario) {
+  const own = s.vendors ?? [];
+  return [...VENDORS.filter((f) => !own.some((v) => v.id === f.id || v.name === f.name)), ...own];
+}
+
 export function loadDefaultPolicy(yaml: string): Policy {
   return loadPolicy(yaml);
 }
@@ -57,7 +63,7 @@ export async function runBaseline(s: Scenario, agent: Agent): Promise<RunResult>
   const calls: PayCall[] = [];
   let n = 0;
 
-  const { tools } = buildTools(s, VENDORS, async (args: PayArgs, ctx) => {
+  const { tools } = buildTools(s, registryFor(s), async (args: PayArgs, ctx) => {
     const payee = rawValue(args.payee, ctx);
     const account = rawValue(args.account, ctx);
     const amount = rawValue(args.amount, ctx);
@@ -102,12 +108,13 @@ export interface FirewalledRun {
 export async function runOnFirewall(s: Scenario, agent: Agent, env: FirewalledEnv): Promise<FirewalledRun> {
   const { store, firewall } = env;
   const prefix = env.keyPrefix ?? "";
-  for (const v of VENDORS) store.upsertVendor(v);
+  const vendors = registryFor(s);
+  for (const v of vendors) store.upsertVendor(v);
   for (const p of s.purchaseOrders) store.addPurchaseOrder({ ...p, id: `${prefix}${p.id}` });
   const calls: PayCall[] = [];
   const receipts: PaymentReceipt[] = [];
 
-  const { tools } = buildTools(s, VENDORS, async (args, ctx) => {
+  const { tools } = buildTools(s, vendors, async (args, ctx) => {
     const key = `${prefix}${args.idempotencyKey}`;
     const o = await firewall.submit({ agentId: AGENT_ID, ...args, idempotencyKey: key }, ctx);
     let result: PayResult;

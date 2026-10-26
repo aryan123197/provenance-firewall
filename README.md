@@ -40,7 +40,7 @@ agent ──proposes (handles)──▶ firewall ──allow / needs approval / 
 | Piece | State |
 | --- | --- |
 | Provenance model, policy engine, idempotency, approvals, signed audit log, reconciliation | Implemented and tested (200+ tests, including property tests over tens of thousands of random intents) |
-| PayPal Payouts adapter | Implemented against PayPal's documented API and tested against an in-process fake. **It has not yet been run against the live PayPal sandbox.** |
+| PayPal Payouts and Invoicing adapters | Implemented against PayPal's documented APIs and tested against an in-process fake (including an injected invoice read through the Invoicing client and run through both agents). **Neither has yet been run against the live PayPal sandbox**, and the Invoicing field names in particular are from the documentation, not confirmed against live responses. |
 | Red-team harness and scorecard | Runs offline. Agent is a deterministic stand-in; payments are an in-process fake. |
 | Dashboard (activity, decision replay, approvals, policy and scorecard) | Implemented |
 | Plain-English policy authoring (compile, diff, generated tests, confirm, versioned in the audit log) | Implemented and tested with a fake model. **Not yet run against the live Claude API.** |
@@ -59,6 +59,8 @@ pnpm harness               # regenerate reports/scorecard.{md,json} (determinist
 pnpm build                 # build the dashboard
 pnpm dev:demo              # http://localhost:3000, simulated PayPal, demo scenarios, open approvals
 pnpm harness:llm           # same scenarios with a real Claude agent (needs ANTHROPIC_API_KEY; paid API calls)
+pnpm seed:invoices         # create a clean and an injected invoice in your PayPal sandbox (needs credentials)
+pnpm demo:invoices <ids>   # read them back and compare the unprotected agent with the firewalled one
 pnpm e2e                   # scripted payment (attack step runs offline; payout step needs sandbox credentials)
 ```
 
