@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Pre-commit checks on staged files. Install with: ./scripts/install-hooks.sh
+set -u
+fail=0
+files=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$files" ] && exit 0
+
+err() { echo "pre-commit: $1" >&2; fail=1; }
+
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+
+  # Files over 1 MB
+  if [ "$(wc -c < "$f")" -gt 1048576 ]; then err "$f is larger than 1 MB"; fi
+
+  # Skip binaries for content checks
+  grep -Iq . "$f" 2>/dev/null || continue
+
+  # Merge conflict markers
+  if git diff --cached -U0 -- "$f" | grep -qE '^\+(<<<<<<< |=======$|>>>>>>> )'; then
+    err "$f contains merge conflict markers"
+  fi
+
+  # Likely secrets
+  if git diff --cached -U0 -- "$f" | grep -qE '^\+.*(AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|ghp_[A-Za-z0-9]{36}|sk-[A-Za-z0-9]{32,}|xox[baprs]-[A-Za-z0-9-]{10,})'; then
+    err "$f appears to contain a secret or private key"
+  fi
+
+  # JSON must parse
+  case "$f" in
+    *.json) command -v jq >/dev/null && ! jq -e . "$f" >/dev/null 2>&1 && err "$f is not valid JSON" ;;
+  esac
+done <<< "$files"
+
+# Whitespace errors in the staged diff (trailing whitespace, etc.)
+git diff --cached --check >&2 || fail=1
+
+if [ "$fail" -ne 0 ]; then
+  echo "pre-commit: commit blocked. Fix the issues above (bypass once with --no-verify)." >&2
+  exit 1
+fi
