@@ -87,7 +87,7 @@ export function App() {
 }
 
 /** Approving and activating policies need the operator token when the server is not in open demo mode. */
-function OperatorSignIn() {
+export function OperatorSignIn() {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [signedIn, setSignedIn] = useState(Boolean(operatorToken.get()));

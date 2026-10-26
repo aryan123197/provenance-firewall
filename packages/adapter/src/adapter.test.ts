@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { evaluate, loadPolicy, tag, type Decision, type OriginKind, type PolicyState, type ResolvedIntent } from "@pfw/core";
-import { Authority, AdapterError, PayPalAdapter, UnauthorizedPaymentError, formatAmount, type AllowedIntent } from "./index";
+import { Authority, AdapterError, PayPalAdapter, UnauthorizedPaymentError, formatAmount, mapPayPalStatus, type AllowedIntent } from "./index";
 import { createFakePayPal } from "./testing/fake-paypal";
 
 const POLICY = loadPolicy(`
@@ -295,5 +295,29 @@ describe("a reused sender_batch_id (PayPal's strict duplicate handling)", () => 
       String(input).endsWith("/v1/payments/payouts") && init?.method === "POST" ? new Response(JSON.stringify({ name: "DUPLICATE_REQUEST_ID" }), { status: 409 }) : realFetch(input, init);
     const adapter = new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: conflict });
     await expect(adapter.execute(allowed())).rejects.toMatchObject({ retryable: true, httpStatus: 409 });
+  });
+});
+
+describe("mapPayPalStatus", () => {
+  test.each([
+    ["SUCCESS", "success"], ["PENDING", "pending"], ["PROCESSING", "pending"], ["NEW", "pending"], ["ONHOLD", "pending"],
+    ["FAILED", "failed"], ["DENIED", "failed"], ["CANCELED", "failed"], ["BLOCKED", "failed"], ["REFUNDED", "failed"], ["REVERSED", "failed"],
+    ["UNCLAIMED", "unclaimed"], ["RETURNED", "returned"], ["SOMETHING_NEW", "unknown"], [undefined, "unknown"],
+  ])("%s -> %s", (input, expected) => expect(mapPayPalStatus(input)).toBe(expected));
+});
+
+describe("PayPalHttp error handling", () => {
+  test("a token response without an access_token is a non-retryable error", async () => {
+    const adapter = new PayPalAdapter({ clientId: "a", clientSecret: "b", authority, baseUrl: "http://localhost:9999", fetch: (async () => new Response(JSON.stringify({ nope: 1 }), { status: 200 })) as typeof fetch });
+    await expect(adapter.execute(allowed())).rejects.toMatchObject({ retryable: false, message: expect.stringContaining("access_token") });
+  });
+  test("a non-JSON error body is kept as text on the error", async () => {
+    const fake = createFakePayPal();
+    const real = fake.fetch;
+    const adapter = new PayPalAdapter({
+      clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999",
+      fetch: (async (i, init) => (String(i).endsWith("/payouts") ? new Response("Bad Gateway from a proxy", { status: 502 }) : real(i, init))) as typeof fetch,
+    });
+    await expect(adapter.execute(allowed())).rejects.toMatchObject({ retryable: true, httpStatus: 502, body: "Bad Gateway from a proxy" });
   });
 });

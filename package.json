@@ -23,23 +23,28 @@
     "seed:invoices": "tsx scripts/seed-invoices.ts",
     "demo:invoices": "tsx scripts/demo-invoices.ts",
     "verify:audit": "tsx scripts/verify-audit.ts",
-    "register:webhook": "tsx scripts/register-webhook.ts"
+    "register:webhook": "tsx scripts/register-webhook.ts",
+    "coverage": "vitest run --coverage"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.5",
+    "@vitest/coverage-v8": "^5.0.5",
     "fast-check": "^4.10.2",
+    "jsdom": "^30.1.3",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   },
   "dependencies": {
-    "tsx": "^4.23.15",
-    "@pfw/server": "workspace:*",
-    "@pfw/harness": "workspace:*",
-    "@pfw/core": "workspace:*",
-    "@pfw/store": "workspace:*",
     "@pfw/adapter": "workspace:*",
+    "@pfw/core": "workspace:*",
     "@pfw/firewall": "workspace:*",
-    "@pfw/llm": "workspace:*"
+    "@pfw/harness": "workspace:*",
+    "@pfw/llm": "workspace:*",
+    "@pfw/server": "workspace:*",
+    "@pfw/store": "workspace:*",
+    "tsx": "^4.23.15"
   }
 }
