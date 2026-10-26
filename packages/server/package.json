@@ -1,0 +1,22 @@
+{
+  "name": "@pfw/server",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "HTTP API and static hosting for the dashboard",
+  "exports": {
+    ".": "./src/app.ts"
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.7",
+    "@pfw/adapter": "workspace:*",
+    "@pfw/core": "workspace:*",
+    "@pfw/firewall": "workspace:*",
+    "@pfw/harness": "workspace:*",
+    "@pfw/llm": "workspace:*",
+    "@pfw/store": "workspace:*",
+    "fastify": "^5.12.7",
+    "zod": "^4.6.7"
+  }
+}

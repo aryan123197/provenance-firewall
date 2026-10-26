@@ -1,0 +1,15 @@
+{
+  "name": "@pfw/harness",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Red-team harness: attack scenarios run against an unprotected baseline and the firewalled agent",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@pfw/adapter": "workspace:*",
+    "@pfw/core": "workspace:*",
+    "@pfw/firewall": "workspace:*",
+    "@pfw/store": "workspace:*"
+  }
+}

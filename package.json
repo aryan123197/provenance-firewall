@@ -1,0 +1,41 @@
+{
+  "name": "provenance-firewall",
+  "private": true,
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "typecheck": "tsc --noEmit && pnpm --filter @pfw/dashboard typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "pnpm typecheck && pnpm test",
+    "e2e": "tsx scripts/e2e.ts",
+    "harness": "tsx scripts/harness.ts",
+    "start": "tsx packages/server/src/main.ts",
+    "dev:demo": "DEMO_MODE=1 OPEN_OPERATOR=1 DATABASE_PATH=:memory: tsx packages/server/src/main.ts",
+    "build": "pnpm --filter @pfw/dashboard build",
+    "gen:audit-key": "tsx scripts/gen-audit-key.ts",
+    "harness:llm": "tsx scripts/harness-llm.ts"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.5",
+    "fast-check": "^4.10.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "tsx": "^4.23.15",
+    "@pfw/server": "workspace:*",
+    "@pfw/harness": "workspace:*",
+    "@pfw/core": "workspace:*",
+    "@pfw/store": "workspace:*",
+    "@pfw/adapter": "workspace:*",
+    "@pfw/firewall": "workspace:*",
+    "@pfw/llm": "workspace:*"
+  }
+}

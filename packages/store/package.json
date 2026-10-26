@@ -1,0 +1,15 @@
+{
+  "name": "@pfw/store",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "SQLite persistence: idempotency, vendor registry, purchase orders, spend counters",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@pfw/core": "workspace:*",
+    "better-sqlite3": "^13.0.3"
+  }
+}
