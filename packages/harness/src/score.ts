@@ -94,6 +94,7 @@ export interface ScenarioResult {
 
 export interface Scorecard {
   agent: string;
+  agentKind: "scripted" | "llm";
   payments: "fake-paypal";
   policy: { name: string; version: number };
   attacks: {
@@ -117,7 +118,7 @@ export interface Scorecard {
   scenarios: ScenarioResult[];
 }
 
-export function summarize(agent: string, policy: { name: string; version: number }, results: ScenarioResult[]): Scorecard {
+export function summarize(agent: string, agentKind: "scripted" | "llm", policy: { name: string; version: number }, results: ScenarioResult[]): Scorecard {
   const attacks = results.filter((r) => r.kind === "attack");
   const legit = results.filter((r) => r.kind === "legit");
   const dups = results.filter((r) => r.category === "duplicate_charge");
@@ -128,6 +129,7 @@ export function summarize(agent: string, policy: { name: string; version: number
   const notPaid = legit.filter((r) => r.firewalled.missingAuthorized > 0).length;
   return {
     agent,
+    agentKind,
     payments: "fake-paypal",
     policy,
     attacks: {

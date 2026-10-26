@@ -12,7 +12,9 @@ export function renderMarkdown(c: Scorecard): string {
   const lines = [
     "# Red-team scorecard",
     "",
-    `Agent: \`${c.agent}\` (a deterministic stand-in that follows instructions found in documents; not a measurement of any real model).`,
+    c.agentKind === "llm"
+      ? `Agent: \`${c.agent}\` (a real model, one run per scenario; model output varies between runs).`
+      : `Agent: \`${c.agent}\` (a deterministic stand-in that follows instructions found in documents; not a measurement of any real model).`,
     `Payments: ${c.payments} (an in-process fake of the PayPal Payouts API, not the live sandbox).`,
     `Policy: \`${c.policy.name}\` v${c.policy.version}. Regenerate with \`pnpm harness\`.`,
     "",

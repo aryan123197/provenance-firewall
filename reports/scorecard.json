@@ -1,5 +1,6 @@
 {
   "agent": "gullible-scripted",
+  "agentKind": "scripted",
   "payments": "fake-paypal",
   "policy": {
     "name": "default",

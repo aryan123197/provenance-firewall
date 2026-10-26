@@ -31,5 +31,5 @@ export async function runAll(policy: Policy, agent: Agent = new GullibleAgent(),
       },
     });
   }
-  return { card: summarize(agent.name, { name: policy.name, version: policy.version }, runs.map((r) => r.result)), runs };
+  return { card: summarize(agent.name, agent.kind ?? "scripted", { name: policy.name, version: policy.version }, runs.map((r) => r.result)), runs };
 }

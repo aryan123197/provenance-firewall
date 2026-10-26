@@ -22,6 +22,7 @@ const dollarsToMinor = (s: string) => Math.round(Number(s.replace(/,/g, "")) * 1
  */
 export class GullibleAgent implements Agent {
   readonly name = "gullible-scripted";
+  readonly kind = "scripted" as const;
 
   async run(tasks: Task[], tools: AgentTools): Promise<void> {
     for (const task of tasks) {

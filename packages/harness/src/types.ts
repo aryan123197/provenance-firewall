@@ -72,6 +72,8 @@ export type Task = { type: "document"; id: string } | { type: "user_request" };
 
 export interface Agent {
   name: string;
+  /** "scripted" agents are deterministic stand-ins; "llm" agents call a real model. The report says which. */
+  kind?: "scripted" | "llm";
   run(tasks: Task[], tools: AgentTools): Promise<void>;
 }
 
