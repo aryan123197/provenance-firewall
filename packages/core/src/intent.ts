@@ -3,13 +3,22 @@ import type { ProvenanceContext } from "./context";
 import { tag, type Tagged } from "./provenance";
 
 /** What the agent submits: each field is a handle, or a raw literal (treated as untrusted). */
-const FieldRef = z.union([z.object({ handle: z.string() }).strict(), z.object({ literal: z.unknown() }).strict()]);
+// Everything here comes from the agent, so it is bounded: nothing it sends can bloat the database or the audit log, and
+// names cannot carry control characters (newlines, NUL) into logs, notes or the dashboard.
+const NO_CONTROL = /^[^\u0000-\u001f\u007f]*$/;
+const text = (max: number) => z.string().min(1).max(max).regex(NO_CONTROL, "must not contain control characters");
+
+const FieldRef = z.union([
+  z.object({ handle: text(200) }).strict(),
+  // A literal is a number (an amount) or a short string. Objects, arrays and huge strings are never legitimate.
+  z.object({ literal: z.union([z.number(), z.string().max(1000)]) }).strict(),
+]);
 export type FieldRef = z.infer<typeof FieldRef>;
 
 export const ProposedIntentSchema = z
   .object({
-    agentId: z.string().min(1),
-    idempotencyKey: z.string().min(1),
+    agentId: text(100),
+    idempotencyKey: text(200),
     payee: FieldRef,
     account: FieldRef,
     /** Integer minor units (e.g. cents). */
@@ -21,11 +30,11 @@ export const ProposedIntentSchema = z
 export type ProposedIntent = z.infer<typeof ProposedIntentSchema>;
 
 const FIELD_VALUES = {
-  payee: z.string().min(1),
-  account: z.string().min(1),
+  payee: text(200),
+  account: text(254),
   amount: z.number().int().nonnegative().safe(),
   currency: z.string().regex(/^[A-Z]{3}$/),
-  category: z.string().min(1),
+  category: text(64),
 } as const;
 
 export interface ResolvedIntent {

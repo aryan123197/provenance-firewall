@@ -14,14 +14,31 @@ Read the caveats before quoting these: the agent is a deterministic stand-in tha
 
 ## How it works
 
+```mermaid
+flowchart LR
+  subgraph untrusted["Untrusted content"]
+    inv["Invoices, emails,<br/>web pages"]
+  end
+  agent["LLM agent<br/>holds no credentials"]
+  harness["Harness<br/>labels every source<br/>(user / registry / invoice / ...)"]
+  fw{"Firewall<br/>deterministic policy<br/>(no model called)"}
+  human["Operator<br/>approves one exact payment"]
+  auth["Authorization<br/>HMAC over the exact values"]
+  pp["PayPal adapter<br/>Payouts"]
+  paypal[("PayPal")]
+  log[("Signed, hash-chained<br/>audit log")]
+
+  inv --> harness
+  harness -- "handles + trust level" --> agent
+  agent -- "proposes payment by handle" --> fw
+  fw -- "deny" --> log
+  fw -- "needs approval" --> human --> fw
+  fw -- "allow" --> auth --> pp --> paypal
+  fw -. "every decision" .-> log
+  paypal -- "webhooks (signature checked)" --> log
 ```
-agent ──proposes (handles)──▶ firewall ──allow / needs approval / deny──▶ audit log (signed, hash-chained)
-                                  │
-                                  └─ only an allow (or a person's approval) mints an authorization
-                                         │
-                                         ▼
-                                   PayPal adapter ──▶ PayPal (Payouts) ──webhooks──▶ reconciliation
-```
+
+The agent proposes, the firewall decides, and only an allowed intent (or one a person approved) is turned into an authorization the PayPal adapter will accept. Every decision, including denials, lands in the audit log, and PayPal's webhooks are matched against it.
 
 1. **Provenance.** The harness labels every tool result with its source. The agent passes *handles* (`vendor:acme#account`, `invoice:inv_204#total`), never raw strings; a raw string is treated as untrusted because the model may have copied it from injected text. Each field takes the lowest trust of anything that fed into it: T0 you said it, T1 trusted record, T2 derived from those, T3 untrusted.
 2. **Deterministic policy.** A pure function of the intent, the policy version and stored state. No LLM is called, so the same input always gives the same verdict and every rule is unit-tested. Rules: untrusted payee, payee change, new payee, amount mismatch vs purchase order, approval threshold, hard limits, allowlist, velocity.

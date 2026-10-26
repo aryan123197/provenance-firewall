@@ -139,7 +139,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
         const input = { approver: approver.trim(), approve, ...(typeof req.body.note === "string" ? { note: req.body.note } : {}) };
         return await deps.runtime().firewall.resolveApproval(req.params.id, input);
       } catch (e) {
-        if (e instanceof ApprovalStateError) return reply.code(/unknown/.test(e.message) ? 404 : 409).send({ error: e.message });
+        if (e instanceof ApprovalStateError) return reply.code(/unknown/.test(e.message) ? 404 : /too long/.test(e.message) ? 400 : 409).send({ error: e.message });
         throw e;
       }
     };
@@ -270,7 +270,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
       });
       return { ok: true, version: next.version, hash: next.hash };
     } catch (e) {
-      if (e instanceof PolicyConflictError) return reply.code(409).send({ error: e.message });
+      if (e instanceof PolicyConflictError) return reply.code(/too long/.test(e.message) ? 400 : 409).send({ error: e.message });
       throw e;
     }
   });

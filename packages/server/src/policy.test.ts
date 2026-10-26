@@ -318,3 +318,16 @@ describe("rate limiting", () => {
     for (let i = 0; i < 20; i++) expect((await free.app.inject({ url: "/api/status" })).statusCode).toBe(200);
   });
 });
+
+describe("oversized operator text is a 400, not a stored entry", () => {
+  test("approver and note on an approval, and the confirmer on a policy", async () => {
+    const d = build({ demo: true });
+    await d.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-above-threshold" } });
+    const { approvals } = (await d.app.inject({ url: "/api/approvals?status=pending" })).json() as { approvals: { id: string }[] };
+    const url = `/api/approvals/${approvals[0]!.id}/approve`;
+    expect((await d.app.inject({ method: "POST", url, headers: op, payload: { approver: "a".repeat(201) } })).statusCode).toBe(400);
+    expect((await d.app.inject({ method: "POST", url, headers: op, payload: { approver: "dana", note: "n".repeat(1001) } })).statusCode).toBe(400);
+    expect((await d.app.inject({ method: "POST", url: "/api/policy/activate", headers: op, payload: { baseVersion: 1, patch: { approvalThreshold: 30_000 }, confirmedBy: "c".repeat(201) } })).statusCode).toBe(400);
+    expect(((await d.app.inject({ url: "/api/approvals?status=pending" })).json() as { approvals: unknown[] }).approvals).toHaveLength(1);
+  });
+});
