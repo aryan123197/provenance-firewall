@@ -28,7 +28,7 @@ agent ──proposes (handles)──▶ firewall ──allow / needs approval / 
 3. **No bypass.** The PayPal adapter accepts only an authorization (an HMAC over the exact values, decision and policy hash) that the firewall mints for an allowed intent or a person's approval. Forged or edited ones are rejected before any request.
 4. **Exactly once.** One decision per idempotency key; a stable `PayPal-Request-Id`; purchase orders close when paid, so a re-sent invoice is not paid twice.
 5. **Human approval** bound to one payment, single use, attributed, and unable to override a hard limit.
-6. **Signed audit trail and reconciliation.** Every decision, including denials, is an Ed25519-signed hash-chained entry. PayPal webhooks are verified and matched against it; payments we did not authorize show up as drift.
+6. **Signed audit trail and reconciliation.** Every decision, including denials, is an Ed25519-signed hash-chained entry. The whole log exports as one file that `pnpm verify:audit` checks offline, with no server (`curl localhost:3000/api/audit/export > audit.json && pnpm verify:audit audit.json <head-hash-you-recorded>`); the head hash is what catches entries removed from the end. PayPal webhooks are verified and matched against it; payments we did not authorize show up as drift.
 
 ## Where PayPal and the LLM are used
 

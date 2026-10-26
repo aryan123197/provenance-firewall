@@ -256,6 +256,11 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.get<{ Querystring: { after?: string; limit?: string } }>("/api/audit", async (req) => ({
     entries: deps.runtime().store.audit.entries({ after: Number(req.query.after ?? 0) || 0, limit: Math.min(Number(req.query.limit ?? 200) || 200, 1000) }),
   }));
+  // Everything needed to verify the log offline: `pnpm verify:audit <file>` checks it without trusting this server.
+  app.get("/api/audit/export", async (_req, reply) => {
+    reply.header("content-disposition", 'attachment; filename="audit-export.json"');
+    return deps.runtime().store.audit.exportAll();
+  });
   app.get("/api/audit/verify", async () => deps.runtime().store.audit.verify());
 
   app.get("/api/scorecard", async (_req, reply) => {

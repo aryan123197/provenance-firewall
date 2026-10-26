@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import type { PolicyDoc } from "@pfw/core";
 import type { Agent } from "@pfw/harness";
 import { LlmBudgetError, LlmRefusalError, type CompilerOutput, type MessagesClient, type PolicyCompiler } from "@pfw/llm";
+import { verifyAuditExport } from "@pfw/store";
 import { buildServer, type Server } from "./server";
 
 const policyPath = new URL("../../../policies/default.policy.yaml", import.meta.url).pathname;
@@ -253,3 +254,18 @@ describe("the Claude budget and agent failures reach the client as clear errors"
     expect(calls).toHaveLength(1);
   });
 });
+
+describe("audit export", () => {
+  test("the export downloads as a file and verifies offline, and a doctored copy does not", async () => {
+    await post0("/api/registry/vendors", { id: "zeta", name: "Zeta Co", account: "zeta@sandbox.example", category: "software", changedBy: "dana" });
+    const res = await server.app.inject({ url: "/api/audit/export" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-disposition"]).toContain("audit-export.json");
+    const exp = res.json() as Parameters<typeof verifyAuditExport>[0];
+    expect(verifyAuditExport(exp)).toMatchObject({ ok: true, count: 1 });
+    (exp.entries[0]!.payload as { changedBy: string }).changedBy = "someone-else";
+    expect(verifyAuditExport(exp).ok).toBe(false);
+  });
+});
+
+const post0 = (url: string, payload: Record<string, unknown>) => server.app.inject({ method: "POST", url, headers: op, payload });
