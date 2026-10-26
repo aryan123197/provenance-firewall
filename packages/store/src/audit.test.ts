@@ -1,0 +1,129 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { generateKeyPairSync } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { loadPolicy, tag, type OriginKind, type ResolvedIntent } from "@pfw/core";
+import { Store, createSigner } from "./index";
+
+const policy = loadPolicy(readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8"));
+const f = <T>(kind: OriginKind, value: T) => tag(value, { kind, ref: `${kind}:test` });
+const intent = (key: string, o: Partial<ResolvedIntent> = {}): ResolvedIntent => ({
+  agentId: "a1",
+  idempotencyKey: key,
+  payee: f("vendor", "Acme Supplies"),
+  account: f("vendor", "acct_acme"),
+  amount: f("user", 4500),
+  currency: f("user", "USD"),
+  category: f("vendor", "office_supplies"),
+  ...o,
+});
+
+let store: Store;
+beforeEach(() => {
+  store = new Store({ clock: () => new Date("2026-10-29T12:00:00.000Z") });
+  store.upsertVendor({ id: "acme", name: "Acme Supplies", account: "acct_acme", category: "office_supplies" });
+});
+afterEach(() => store.close());
+
+const fill = () => {
+  store.decide(intent("k1"), policy);
+  store.decide(intent("k2", { account: f("invoice", "acct_evil") }), policy); // denial is logged too
+  store.saveExecution("k1", { state: "executed", retryable: false, payload: { reference: "B1" } });
+};
+const dropTriggers = () => store.db.exec("DROP TRIGGER audit_no_update; DROP TRIGGER audit_no_delete;");
+
+describe("audit log", () => {
+  test("records every decision (including denials) and executions in a verifiable chain", () => {
+    fill();
+    const entries = store.audit.entries();
+    expect(entries.map((e) => e.type)).toEqual(["decision", "decision", "execution"]);
+    expect(entries[0]?.prevHash).toBe("0".repeat(64));
+    expect(entries[1]?.prevHash).toBe(entries[0]?.hash);
+    expect((entries[1]?.payload as { decision: { verdict: string } }).decision.verdict).toBe("deny");
+    expect(store.audit.verify()).toMatchObject({ ok: true, count: 3 });
+  });
+  test("an empty log verifies", () => expect(store.audit.verify()).toEqual({ ok: true, count: 0, head: null }));
+  test("replays and rejected key reuse add no entries", () => {
+    store.decide(intent("k1"), policy);
+    store.decide(intent("k1"), policy);
+    expect(() => store.decide(intent("k1", { amount: f("user", 1) }), policy)).toThrow();
+    expect(store.audit.entries()).toHaveLength(1);
+  });
+  test("a decision and its audit entry commit or roll back together", () => {
+    const broken = { ...intent("kx"), amount: undefined } as unknown as ResolvedIntent;
+    expect(() => store.decide(broken, policy)).toThrow();
+    expect(store.audit.entries()).toHaveLength(0);
+  });
+
+  test("normal SQL cannot edit or delete entries", () => {
+    fill();
+    expect(() => store.db.prepare("UPDATE audit_log SET type = 'x'").run()).toThrow(/append-only/);
+    expect(() => store.db.prepare("DELETE FROM audit_log").run()).toThrow(/append-only/);
+  });
+
+  describe("tampering is detected even when the database triggers are bypassed", () => {
+    beforeEach(() => {
+      fill();
+      dropTriggers();
+    });
+    test("edited payload", () => {
+      store.db.prepare("UPDATE audit_log SET payload_json = replace(payload_json, 'deny', 'allow') WHERE seq = 2").run();
+      expect(store.audit.verify()).toMatchObject({ ok: false, seq: 2, reason: expect.stringContaining("hash") });
+    });
+    test("edited execution payload is detected", () => {
+      const row = store.db.prepare("SELECT * FROM audit_log WHERE seq = 3").get() as { payload_json: string };
+      const forged = row.payload_json.replace("B1", "B2");
+      store.db.prepare("UPDATE audit_log SET payload_json = ? WHERE seq = 3").run(forged);
+      expect(store.audit.verify().ok).toBe(false);
+    });
+    test("removed middle entry", () => {
+      store.db.prepare("DELETE FROM audit_log WHERE seq = 2").run();
+      expect(store.audit.verify()).toMatchObject({ ok: false, seq: 2 });
+    });
+    test("swapped signature", () => {
+      const sig = (store.db.prepare("SELECT signature FROM audit_log WHERE seq = 1").get() as { signature: string }).signature;
+      store.db.prepare("UPDATE audit_log SET signature = ? WHERE seq = 2").run(sig);
+      expect(store.audit.verify()).toMatchObject({ ok: false, seq: 2, reason: "signature is invalid" });
+    });
+    test("a key swapped into audit_keys cannot vouch for entries signed by another key", () => {
+      const other = generateKeyPairSync("ed25519").publicKey.export({ type: "spki", format: "pem" }).toString();
+      const id = (store.db.prepare("SELECT key_id FROM audit_log WHERE seq = 1").get() as { key_id: string }).key_id;
+      store.db.prepare("UPDATE audit_keys SET public_pem = ? WHERE key_id = ?").run(other, id);
+      expect(store.audit.verify().ok).toBe(false);
+    });
+    test("removed newest entries are caught against a recorded head", () => {
+      const head = store.audit.head()!;
+      store.db.prepare("DELETE FROM audit_log WHERE seq = 3").run();
+      expect(store.audit.verify().ok).toBe(true); // a bare chain cannot show truncation
+      expect(store.audit.verify(head)).toMatchObject({ ok: false });
+    });
+  });
+
+  test("the log stays verifiable across restarts and key changes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pfw-"));
+    const path = join(dir, "pfw.db");
+    try {
+      const clock = () => new Date("2026-10-29T12:00:00.000Z");
+      let s = new Store({ path, clock, signer: createSigner() });
+      s.upsertVendor({ id: "acme", name: "Acme Supplies", account: "acct_acme", category: "office_supplies" });
+      s.decide(intent("a"), policy);
+      s.close();
+      s = new Store({ path, clock, signer: createSigner() }); // new key
+      s.decide(intent("b"), policy);
+      const keys = new Set(s.audit.entries().map((e) => e.keyId));
+      expect(keys.size).toBe(2);
+      expect(s.audit.verify()).toMatchObject({ ok: true, count: 2 });
+      s.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a signer can be restored from a base64 PKCS8 key", () => {
+    const { privateKey } = generateKeyPairSync("ed25519");
+    const b64 = privateKey.export({ type: "pkcs8", format: "der" }).toString("base64");
+    expect(createSigner(b64).keyId).toBe(createSigner(b64).keyId);
+    expect(createSigner(privateKey.export({ type: "pkcs8", format: "pem" }).toString()).keyId).toBe(createSigner(b64).keyId);
+  });
+});

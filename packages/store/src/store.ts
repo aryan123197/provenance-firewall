@@ -11,6 +11,7 @@ import {
   type ResolvedIntent,
   type VendorRecord,
 } from "@pfw/core";
+import { AuditLog, createSigner, type Signer } from "./audit";
 import { SCHEMA } from "./schema";
 
 export class IdempotencyConflictError extends Error {
@@ -35,6 +36,8 @@ export interface ExecutionRecord {
 export interface StoreOptions {
   path?: string;
   clock?: () => Date;
+  /** Signs audit entries. Defaults to an ephemeral key. */
+  signer?: Signer;
 }
 
 /** Hash of what the key authorizes. Reusing a key for different values is an error, not a replay. */
@@ -56,6 +59,7 @@ interface PoRow { id: string; vendor_id: string; amount: number; currency: strin
 export class Store {
   /** Exposed for tests and operator tooling; the firewall only uses the methods below. */
   readonly db: Database.Database;
+  readonly audit: AuditLog;
   private readonly clock: () => Date;
 
   constructor(opts: StoreOptions = {}) {
@@ -65,6 +69,7 @@ export class Store {
     this.db.pragma("busy_timeout = 5000");
     this.db.pragma("foreign_keys = ON");
     this.db.exec(SCHEMA);
+    this.audit = new AuditLog(this.db, opts.signer ?? createSigner(), this.clock);
   }
 
   close(): void {
@@ -116,6 +121,8 @@ export class Store {
         )
         .run(intent.idempotencyKey, intent.agentId, hash, decision.verdict, JSON.stringify(decision), at);
 
+      this.audit.append("decision", { idempotencyKey: intent.idempotencyKey, agentId: intent.agentId, decision });
+
       if (decision.verdict === "allow") {
         const vendor = this.matchVendor(intent);
         this.db
@@ -135,12 +142,17 @@ export class Store {
 
   saveExecution(key: string, rec: ExecutionRecord): void {
     this.db
-      .prepare(
-        `INSERT INTO executions (idempotency_key, state, retryable, payload_json, updated_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(idempotency_key) DO UPDATE SET state = excluded.state, retryable = excluded.retryable,
-           payload_json = excluded.payload_json, updated_at = excluded.updated_at`,
-      )
-      .run(key, rec.state, rec.retryable ? 1 : 0, JSON.stringify(rec.payload), this.clock().toISOString());
+      .transaction(() => {
+        this.db
+          .prepare(
+            `INSERT INTO executions (idempotency_key, state, retryable, payload_json, updated_at) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(idempotency_key) DO UPDATE SET state = excluded.state, retryable = excluded.retryable,
+               payload_json = excluded.payload_json, updated_at = excluded.updated_at`,
+          )
+          .run(key, rec.state, rec.retryable ? 1 : 0, JSON.stringify(rec.payload), this.clock().toISOString());
+        this.audit.append("execution", { idempotencyKey: key, state: rec.state, retryable: rec.retryable, payload: rec.payload });
+      })
+      .immediate();
   }
 
   private matchVendor(i: ResolvedIntent): VendorRecord | null {

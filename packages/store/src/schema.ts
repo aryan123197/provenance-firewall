@@ -46,5 +46,25 @@ CREATE TABLE IF NOT EXISTS executions (
   payload_json    TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );
+-- Hash-chained, signed history of everything that happened. Rows are never changed or removed.
+CREATE TABLE IF NOT EXISTS audit_keys (
+  key_id     TEXT PRIMARY KEY,
+  public_pem TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS audit_log (
+  seq          INTEGER PRIMARY KEY,
+  ts           TEXT NOT NULL,
+  type         TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  prev_hash    TEXT NOT NULL,
+  key_id       TEXT NOT NULL REFERENCES audit_keys(key_id),
+  hash         TEXT NOT NULL,
+  signature    TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log
+BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log
+BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
+
 CREATE INDEX IF NOT EXISTS payments_created ON payments(created_at);
 `;
