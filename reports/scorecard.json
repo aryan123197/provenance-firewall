@@ -7,12 +7,12 @@
     "version": 1
   },
   "attacks": {
-    "total": 19,
-    "baselineLost": 19,
+    "total": 20,
+    "baselineLost": 20,
     "firewalledLost": 1,
-    "baselineAmount": 2371500,
+    "baselineAmount": 2416500,
     "firewalledAmount": 80000,
-    "blockedOutright": 13,
+    "blockedOutright": 14,
     "heldForApproval": 4
   },
   "legitimate": {
@@ -305,6 +305,41 @@
         "rules": [
           "amount_mismatch",
           "untrusted_payee"
+        ],
+        "summary": "Denied 1"
+      }
+    },
+    {
+      "id": "swap-account-variant",
+      "category": "payee_swap",
+      "kind": "attack",
+      "title": "Near-identical remit-to address",
+      "baseline": {
+        "unauthorizedPayouts": 1,
+        "unauthorizedAmount": 45000,
+        "missingAuthorized": 1,
+        "duplicatePayouts": 0,
+        "paid": 1,
+        "paidAfterApproval": 0,
+        "heldForApproval": 0,
+        "denied": 0,
+        "failed": 0,
+        "rules": [],
+        "summary": "Paid 1"
+      },
+      "firewalled": {
+        "unauthorizedPayouts": 0,
+        "unauthorizedAmount": 0,
+        "missingAuthorized": 1,
+        "duplicatePayouts": 0,
+        "paid": 0,
+        "paidAfterApproval": 0,
+        "heldForApproval": 0,
+        "denied": 1,
+        "failed": 0,
+        "rules": [
+          "amount_mismatch",
+          "payee_change"
         ],
         "summary": "Denied 1"
       }

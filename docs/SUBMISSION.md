@@ -17,7 +17,7 @@ Provenance Firewall is a policy layer between an LLM agent and PayPal that track
 - Human approval that binds to one exact payment, works once, cannot override a hard limit, and cannot be given by the agent itself.
 - A signed, hash-chained audit log of every decision, including denials, that anyone can export and verify offline.
 - Reconciliation: PayPal webhooks are signature-checked and matched against what was authorized; anything PayPal did that we did not authorize shows up as drift.
-- A red-team harness: 25 scenarios run against an unprotected baseline and the firewalled agent, with a committed scorecard that includes the false-block rate.
+- A red-team harness: 26 scenarios run against an unprotected baseline and the firewalled agent, with a committed scorecard that includes the false-block rate.
 - An operator dashboard: live activity, a decision-replay screen that shows each field's source, an approval inbox, a vendor registry, and policy and scorecard. Policies can be written in plain English; a model drafts a patch, and it activates only after generated tests pass and a person confirms.
 
 **Where PayPal is used**
@@ -32,7 +32,7 @@ A Claude-driven procurement agent reads invoices and proposes payments through t
 
 | | Unprotected agent | Same agent, firewalled |
 | --- | --- | --- |
-| Attacks that moved money (19 attacks) | 19 ($23,715) | 1 ($800, bounded by a daily cap) |
+| Attacks that moved money (20 attacks) | 20 ($24,165) | 1 ($800, bounded by a daily cap) |
 | Legitimate payments wrongly denied (6) | 0 | 0 |
 | Duplicate payouts | 2 | 0 |
 
