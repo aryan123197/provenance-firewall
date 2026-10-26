@@ -69,7 +69,7 @@ export function App() {
         ) : route === "/policy" ? (
           <PolicyScreen />
         ) : (
-          <Activity open={go} demo={Boolean(status?.demo)} onChange={refresh} />
+          <Activity open={go} demo={Boolean(status?.demo)} llm={Boolean(status?.llmAgentAvailable)} onChange={refresh} />
         )}
       </main>
 

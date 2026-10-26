@@ -7,7 +7,7 @@ import { usePoll } from "../hooks";
 import { CATEGORY_LABEL, money, outcome, ruleTitle, time } from "../labels";
 import { gridTheme } from "../theme";
 
-export function Activity({ open, demo, onChange }: { open: (to: string) => void; demo: boolean; onChange: () => void }) {
+export function Activity({ open, demo, llm, onChange }: { open: (to: string) => void; demo: boolean; llm: boolean; onChange: () => void }) {
   const { data, error, refresh } = usePoll(api.decisions, 2500);
   const [filter, setFilter] = useState("");
   const [verdict, setVerdict] = useState<"all" | DecisionSummary["verdict"]>("all");
@@ -29,7 +29,7 @@ export function Activity({ open, demo, onChange }: { open: (to: string) => void;
 
   return (
     <div className="stack">
-      {demo && <DemoRunner onRan={() => { void refresh(); onChange(); }} open={open} />}
+      {demo && <DemoRunner llm={llm} onRan={() => { void refresh(); onChange(); }} open={open} />}
       <Card
         title="Live activity"
         aside={
@@ -74,10 +74,12 @@ export function Activity({ open, demo, onChange }: { open: (to: string) => void;
   );
 }
 
-function DemoRunner({ open, onRan }: { open: (to: string) => void; onRan: () => void }) {
+function DemoRunner({ open, onRan, llm }: { open: (to: string) => void; onRan: () => void; llm: boolean }) {
   const { data: scenarios } = usePoll(api.scenarios, 60000);
   const [id, setId] = useState("inj-note-redirect");
   const [busy, setBusy] = useState(false);
+  const [agent, setAgent] = useState<"scripted" | "llm">("scripted");
+  const [request, setRequest] = useState("");
   const [run, setRun] = useState<DemoRun | undefined>();
   const [err, setErr] = useState<string | undefined>();
 
@@ -92,7 +94,7 @@ function DemoRunner({ open, onRan }: { open: (to: string) => void; onRan: () => 
     setBusy(true);
     setErr(undefined);
     try {
-      setRun(await api.runScenario(id));
+      setRun(await api.runScenario(id, agent, agent === "llm" ? request.trim() : undefined));
       onRan();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -130,10 +132,22 @@ function DemoRunner({ open, onRan }: { open: (to: string) => void; onRan: () => 
             ))}
           </select>
         </label>
+        {llm && (
+          <div className="segmented" role="group" aria-label="Which agent">
+            <button aria-pressed={agent === "scripted"} onClick={() => setAgent("scripted")} title="A deterministic stand-in that does whatever a document says. The worst case.">Scripted (worst case)</button>
+            <button aria-pressed={agent === "llm"} onClick={() => setAgent("llm")} title="A live Claude model reading the same documents">Claude (live)</button>
+          </div>
+        )}
         <button className="btn primary" onClick={go} disabled={busy || !scenarios}>
-          {busy ? "Running…" : "Run it"}
+          {busy ? (agent === "llm" ? "Claude is working…" : "Running…") : "Run it"}
         </button>
       </div>
+      {llm && agent === "llm" && (
+        <label className="field" style={{ marginTop: 10 }}>
+          <span>What the user asks (optional)</span>
+          <input value={request} onChange={(e) => setRequest(e.target.value)} placeholder={current?.request ?? "Order toner from Acme, budget $200"} maxLength={500} />
+        </label>
+      )}
       {current && <p className="muted">{current.description} <em>User asked: “{current.request}”</em></p>}
       {err && <ErrorNote message={err} />}
       {run && <RunResult run={run} open={open} />}
@@ -148,7 +162,7 @@ function RunResult({ run, open }: { run: DemoRun; open: (to: string) => void }) 
     <div className="versus">
       <div className="side baseline">
         <h3>Unprotected agent</h3>
-        <small>holds PayPal credentials · simulated PayPal</small>
+        <small>{run.agentKind === "llm" ? `${run.agent} · ` : ""}holds PayPal credentials · simulated PayPal</small>
         {run.baseline.payouts.length === 0 ? (
           <p className="big neutral">Paid nothing</p>
         ) : (

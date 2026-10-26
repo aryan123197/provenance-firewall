@@ -9,6 +9,8 @@ export type { Approval, AuditEntry, Decision, DecisionRecord, DecisionSummary, D
 export interface Status {
   mode: "sandbox" | "simulated";
   demo: boolean;
+  compilerAvailable: boolean;
+  llmAgentAvailable: boolean;
   openOperator: boolean;
   policy: { name: string; version: number; hash: string };
   audit: { ok: true; count: number; head: { seq: number; hash: string } | null } | { ok: false; seq: number; reason: string };
@@ -16,7 +18,48 @@ export interface Status {
   pendingApprovals: number;
 }
 
+export interface PolicyTestResult {
+  id: string;
+  group: string;
+  description: string;
+  expected: string;
+  actual: string;
+  passed: boolean;
+}
+
+export interface PolicyChange {
+  path: string;
+  label: string;
+  before: string;
+  after: string;
+  direction: "looser" | "tighter" | "changed";
+}
+
+export interface CompileResult {
+  baseVersion: number;
+  english: string;
+  summary: string;
+  patch: unknown;
+  unsupported: { clause: string; reason: string }[];
+  examples: unknown[];
+  diff: PolicyChange[];
+  lint: string[];
+  tests: PolicyTestResult[];
+  canActivate: boolean;
+}
+
+export interface PolicyVersion {
+  version: number;
+  hash: string;
+  sourceText: string | null;
+  confirmedBy: string;
+  createdAt: string;
+  active: boolean;
+}
+
 export interface PolicyView {
+  versions: PolicyVersion[];
+  compilerAvailable: boolean;
   policy: {
     name: string;
     version: number;
@@ -27,6 +70,8 @@ export interface PolicyView {
     limits: { perPayment: number; perVendorPerDay: number; totalPerDay: number };
     allowedCategories: string[];
     velocity: { maxPerHour: number };
+    categoryApprovalThresholds: Record<string, number>;
+    newPayeeDenyDays: number[];
   };
   yaml: string;
 }
@@ -49,6 +94,7 @@ export interface PayCallView {
 
 export interface DemoRun {
   agent: string;
+  agentKind: "scripted" | "llm";
   scenario: DemoScenario;
   baseline: { score: SideScore; calls: PayCallView[]; payouts: { receiver: string; amount: number; currency: string }[] };
   firewalled: { score: SideScore; calls: PayCallView[]; payouts: { receiver: string; amount: number; currency: string }[]; pendingApprovals: number };
@@ -78,9 +124,20 @@ export const api = {
     post<ApprovalResult>(`/api/approvals/${encodeURIComponent(id)}/${approve ? "approve" : "reject"}`, { approver, note: note || undefined }),
   drift: () => request<{ drift: Drift[] }>("/api/drift").then((r) => r.drift),
   policy: () => request<PolicyView>("/api/policy"),
+  compilePolicy: (english: string) => post<CompileResult>("/api/policy/compile", { english }),
+  activatePolicy: (c: CompileResult, confirmedBy: string, acknowledgeUnsupported: boolean) =>
+    post<{ ok: true; version: number }>("/api/policy/activate", {
+      baseVersion: c.baseVersion,
+      patch: c.patch,
+      english: c.english,
+      examples: c.examples,
+      unsupported: c.unsupported,
+      confirmedBy,
+      acknowledgeUnsupported,
+    }),
   scorecard: () => request<Scorecard>("/api/scorecard"),
   auditVerify: () => request<{ ok: boolean; count?: number; reason?: string; seq?: number }>("/api/audit/verify"),
   scenarios: () => request<{ scenarios: DemoScenario[] }>("/api/demo/scenarios").then((r) => r.scenarios),
-  runScenario: (scenarioId: string) => post<DemoRun>("/api/demo/run", { scenarioId }),
+  runScenario: (scenarioId: string, agent: "scripted" | "llm", request?: string) => post<DemoRun>("/api/demo/run", { scenarioId, agent, ...(request ? { request } : {}) }),
   resetDemo: () => post<{ ok: true }>("/api/demo/reset", {}),
 };

@@ -1,20 +1,25 @@
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 import { api, type Drift, type ScenarioResultView } from "../api";
 import { Card, Empty, ErrorNote } from "../components/ui";
+import { PolicyEditor } from "./PolicyEditor";
 import { usePoll } from "../hooks";
 import { CATEGORY_LABEL, RULES, dateTime, money, shortHash } from "../labels";
 import { gridTheme } from "../theme";
 
+const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
 export function PolicyScreen() {
-  const { data: policy, error } = usePoll(api.policy, 30000);
+  const { data: policy, error, refresh } = usePoll(api.policy, 10000);
   const { data: drift } = usePoll(api.drift, 5000);
   const p = policy?.policy;
 
   return (
     <div className="stack">
       {drift && drift.some((d) => d.status === "open") && <DriftList drift={drift} />}
+
+      <PolicyEditor view={policy} onActivated={refresh} />
 
       <div className="two-col">
         <Card title="Active policy" aside={p && <span className="muted small">{p.name} v{p.version} · <code title={p.hash}>{shortHash(p.hash)}</code></span>}>
@@ -28,6 +33,10 @@ export function PolicyScreen() {
               <dt>All vendors per day</dt><dd>{money(p.limits.totalPerDay, p.currency)}</dd>
               <dt>Velocity</dt><dd>{p.velocity.maxPerHour} payments per agent per hour</dd>
               <dt>Allowed categories</dt><dd>{p.allowedCategories.join(", ")}</dd>
+              {Object.entries(p.categoryApprovalThresholds).map(([cat, t]) => (
+                <Fragment key={cat}><dt>Approval needed above, {cat}</dt><dd>{money(t, p.currency)}</dd></Fragment>
+              ))}
+              <dt>New payees denied on</dt><dd>{p.newPayeeDenyDays.length ? p.newPayeeDenyDays.map((d) => DAYS[d]).join(", ") : "no day (held for approval)"}</dd>
               <dt>Currency</dt><dd>{p.currency}</dd>
             </dl>
           )}

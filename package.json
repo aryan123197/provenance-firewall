@@ -18,7 +18,8 @@
     "start": "tsx packages/server/src/main.ts",
     "dev:demo": "DEMO_MODE=1 OPEN_OPERATOR=1 DATABASE_PATH=:memory: tsx packages/server/src/main.ts",
     "build": "pnpm --filter @pfw/dashboard build",
-    "gen:audit-key": "tsx scripts/gen-audit-key.ts"
+    "gen:audit-key": "tsx scripts/gen-audit-key.ts",
+    "harness:llm": "tsx scripts/harness-llm.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
@@ -34,6 +35,7 @@
     "@pfw/core": "workspace:*",
     "@pfw/store": "workspace:*",
     "@pfw/adapter": "workspace:*",
-    "@pfw/firewall": "workspace:*"
+    "@pfw/firewall": "workspace:*",
+    "@pfw/llm": "workspace:*"
   }
 }
