@@ -38,5 +38,13 @@ CREATE TABLE IF NOT EXISTS payments (
   currency        TEXT NOT NULL,
   created_at      TEXT NOT NULL
 );
+-- Outcome of sending an allowed payment to the provider. Mutable: a retryable failure can later succeed.
+CREATE TABLE IF NOT EXISTS executions (
+  idempotency_key TEXT PRIMARY KEY REFERENCES decisions(idempotency_key),
+  state           TEXT NOT NULL CHECK (state IN ('executed', 'failed')),
+  retryable       INTEGER NOT NULL DEFAULT 0,
+  payload_json    TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS payments_created ON payments(created_at);
 `;

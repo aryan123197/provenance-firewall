@@ -12,11 +12,17 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "pnpm typecheck && pnpm test"
+    "check": "pnpm typecheck && pnpm test",
+    "e2e": "tsx scripts/e2e.ts"
   },
   "devDependencies": {
+    "@pfw/adapter": "workspace:*",
+    "@pfw/core": "workspace:*",
+    "@pfw/firewall": "workspace:*",
+    "@pfw/store": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }

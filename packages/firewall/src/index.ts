@@ -1,1 +1,1 @@
-export const PACKAGE = "@pfw/firewall";
+export { Firewall, type FirewallConfig, type Outcome } from "./firewall";

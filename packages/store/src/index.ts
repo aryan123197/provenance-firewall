@@ -1,1 +1,1 @@
-export { Store, IdempotencyConflictError, type DecideResult, type StoreOptions } from "./store";
+export { Store, IdempotencyConflictError, type DecideResult, type ExecutionRecord, type StoreOptions } from "./store";

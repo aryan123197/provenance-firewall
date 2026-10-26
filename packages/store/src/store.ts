@@ -26,6 +26,12 @@ export interface DecideResult {
   replayed: boolean;
 }
 
+export interface ExecutionRecord {
+  state: "executed" | "failed";
+  retryable: boolean;
+  payload: unknown;
+}
+
 export interface StoreOptions {
   path?: string;
   clock?: () => Date;
@@ -118,6 +124,23 @@ export class Store {
       }
       return { decision, replayed: false };
     }).immediate();
+  }
+
+  getExecution(key: string): ExecutionRecord | null {
+    const r = this.db.prepare("SELECT state, retryable, payload_json FROM executions WHERE idempotency_key = ?").get(key) as
+      | { state: "executed" | "failed"; retryable: number; payload_json: string }
+      | undefined;
+    return r ? { state: r.state, retryable: r.retryable === 1, payload: JSON.parse(r.payload_json) as unknown } : null;
+  }
+
+  saveExecution(key: string, rec: ExecutionRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO executions (idempotency_key, state, retryable, payload_json, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(idempotency_key) DO UPDATE SET state = excluded.state, retryable = excluded.retryable,
+           payload_json = excluded.payload_json, updated_at = excluded.updated_at`,
+      )
+      .run(key, rec.state, rec.retryable ? 1 : 0, JSON.stringify(rec.payload), this.clock().toISOString());
   }
 
   private matchVendor(i: ResolvedIntent): VendorRecord | null {
