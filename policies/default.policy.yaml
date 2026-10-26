@@ -1,0 +1,16 @@
+# Amounts are integer minor units (cents). Provenance rules are built in and not configurable here.
+name: default
+version: 1
+currency: USD
+approvalThreshold: 50000      # $500.00: strictly above this needs human approval
+amountToleranceBps: 500       # 5%: allowed deviation of a T3 amount from the purchase order
+limits:
+  perPayment: 100000          # $1,000.00
+  perVendorPerDay: 150000     # $1,500.00
+  totalPerDay: 300000         # $3,000.00
+allowedCategories:
+  - office_supplies
+  - software
+  - contractors
+velocity:
+  maxPerHour: 5
