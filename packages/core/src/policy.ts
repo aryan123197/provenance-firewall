@@ -55,3 +55,9 @@ export function loadPolicy(yamlText: string): Policy {
   }
   return { ...parsed.data, hash: hashPolicy(parsed.data) };
 }
+
+/** A validated policy document with its identifying hash, e.g. one read back from the database. */
+export function policyFromDoc(doc: unknown): Policy {
+  const parsed = PolicySchema.parse(doc);
+  return { ...parsed, hash: hashPolicy(parsed) };
+}

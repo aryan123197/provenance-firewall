@@ -83,6 +83,18 @@ CREATE TABLE IF NOT EXISTS approvals (
   note            TEXT
 );
 
+-- Every policy version that was ever activated. The newest active row is what decisions use.
+CREATE TABLE IF NOT EXISTS policy_versions (
+  version      INTEGER PRIMARY KEY,
+  hash         TEXT NOT NULL,
+  doc_json     TEXT NOT NULL,
+  source_text  TEXT,
+  patch_json   TEXT,
+  confirmed_by TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  active       INTEGER NOT NULL DEFAULT 0
+);
+
 -- Hash-chained, signed history of everything that happened. Rows are never changed or removed.
 CREATE TABLE IF NOT EXISTS audit_keys (
   key_id     TEXT PRIMARY KEY,

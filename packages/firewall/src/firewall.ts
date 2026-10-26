@@ -21,7 +21,8 @@ export interface FirewallConfig {
   store: Store;
   adapter: PaymentAdapter;
   authority: Authority;
-  policy: Policy;
+  /** The active policy. A function, so activating a new version takes effect on the next decision. */
+  policy: Policy | (() => Policy);
   /** Verifies provider webhook signatures. Without one, webhooks are refused. */
   webhooks?: WebhookVerifier;
 }
@@ -40,6 +41,10 @@ export class Firewall {
 
   constructor(private readonly cfg: FirewallConfig) {}
 
+  private policy(): Policy {
+    return typeof this.cfg.policy === "function" ? this.cfg.policy() : this.cfg.policy;
+  }
+
   submit(proposed: unknown, ctx: ProvenanceContext): Promise<Outcome> {
     const resolved = resolveIntent(proposed, ctx);
     if (!resolved.ok) return Promise.resolve({ status: "invalid", errors: resolved.errors });
@@ -48,8 +53,8 @@ export class Firewall {
 
   /** Operator action (never exposed to the agent): approve or reject a pending request, then execute if approved. */
   async resolveApproval(id: string, input: { approver: string; approve: boolean; note?: string }): Promise<ApprovalOutcome> {
-    const { store, policy } = this.cfg;
-    const res = store.resolveApproval(id, input, policy);
+    const { store } = this.cfg;
+    const res = store.resolveApproval(id, input, this.policy());
     if (!res.ok) return { status: "blocked", reason: res.reason };
     const approval = store.getApproval(id)!;
     return this.once(approval.intent);
@@ -93,8 +98,8 @@ export class Firewall {
   }
 
   private async run(intent: ResolvedIntent): Promise<Outcome> {
-    const { store, authority, policy } = this.cfg;
-    const { decision, replayed } = store.decide(intent, policy);
+    const { store, authority } = this.cfg;
+    const { decision, replayed } = store.decide(intent, this.policy());
 
     if (decision.verdict === "deny") return { status: "denied", decision, replayed };
 

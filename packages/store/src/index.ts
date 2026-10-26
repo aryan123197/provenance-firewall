@@ -1,6 +1,8 @@
 export {
   Store,
   IdempotencyConflictError,
+  PolicyConflictError,
+  type PolicyVersionRecord,
   ApprovalStateError,
   type Approval,
   type ApprovalGrant,

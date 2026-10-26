@@ -5,8 +5,10 @@ import {
   evaluate,
   isTrusted,
   parseHandle,
-  type Decision,
+  policyFromDoc,
   type Policy,
+  type PolicyDoc,
+  type Decision,
   type PolicyState,
   type PurchaseOrder,
   type ResolvedIntent,
@@ -125,6 +127,24 @@ export interface DecisionRecord {
   execution: (ExecutionRecord & { providerStatus: string | null }) | null;
   approval: Approval | null;
   audit: AuditEntry[];
+}
+
+export class PolicyConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PolicyConflictError";
+  }
+}
+
+export interface PolicyVersionRecord {
+  version: number;
+  hash: string;
+  doc: PolicyDoc;
+  sourceText: string | null;
+  patch: unknown;
+  confirmedBy: string;
+  createdAt: string;
+  active: boolean;
 }
 
 export interface StoreOptions {
@@ -329,6 +349,59 @@ export class Store {
       approval: this.getApprovalByKey(key),
       audit,
     };
+  }
+
+  /** The newest activated policy, if any. Otherwise the deployment's policy file applies. */
+  activePolicy(): Policy | null {
+    const r = this.db.prepare("SELECT doc_json FROM policy_versions WHERE active = 1").get() as { doc_json: string } | undefined;
+    return r ? policyFromDoc(JSON.parse(r.doc_json)) : null;
+  }
+
+  listPolicyVersions(): PolicyVersionRecord[] {
+    const rows = this.db.prepare("SELECT * FROM policy_versions ORDER BY version DESC").all() as {
+      version: number; hash: string; doc_json: string; source_text: string | null; patch_json: string | null; confirmed_by: string; created_at: string; active: number;
+    }[];
+    return rows.map((r) => ({
+      version: r.version,
+      hash: r.hash,
+      doc: JSON.parse(r.doc_json) as PolicyDoc,
+      sourceText: r.source_text,
+      patch: r.patch_json ? (JSON.parse(r.patch_json) as unknown) : null,
+      confirmedBy: r.confirmed_by,
+      createdAt: r.created_at,
+      active: r.active === 1,
+    }));
+  }
+
+  /**
+   * Activate a new policy version. `baseVersion` is the version the author started from; if someone else activated
+   * another one meanwhile this is a conflict, so two edits can never silently overwrite each other.
+   */
+  activatePolicy(input: { baseVersion: number; doc: PolicyDoc; confirmedBy: string; sourceText?: string; patch?: unknown; note?: unknown }): Policy {
+    return this.db.transaction((): Policy => {
+      const current = this.db.prepare("SELECT version FROM policy_versions WHERE active = 1").get() as { version: number } | undefined;
+      const currentVersion = current?.version ?? input.baseVersion;
+      if (input.baseVersion !== currentVersion) {
+        throw new PolicyConflictError(`the active policy is now version ${currentVersion}; this change was based on version ${input.baseVersion}`);
+      }
+      if (input.doc.version !== currentVersion + 1) throw new PolicyConflictError(`the new policy must be version ${currentVersion + 1}`);
+      if (!input.confirmedBy.trim()) throw new PolicyConflictError("who confirmed this change is required");
+      const policy = policyFromDoc(input.doc);
+      const at = this.clock().toISOString();
+      this.db.prepare("UPDATE policy_versions SET active = 0 WHERE active = 1").run();
+      this.db
+        .prepare("INSERT INTO policy_versions (version, hash, doc_json, source_text, patch_json, confirmed_by, created_at, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)")
+        .run(policy.version, policy.hash, JSON.stringify(input.doc), input.sourceText ?? null, input.patch === undefined ? null : JSON.stringify(input.patch), input.confirmedBy.trim(), at);
+      this.audit.append("policy_activated", {
+        version: policy.version,
+        hash: policy.hash,
+        confirmedBy: input.confirmedBy.trim(),
+        sourceText: input.sourceText ?? null,
+        patch: input.patch ?? null,
+        details: input.note ?? null,
+      });
+      return policy;
+    }).immediate();
   }
 
   getApproval(id: string): Approval | null {

@@ -2,8 +2,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { loadPolicy, tag, type OriginKind, type ResolvedIntent } from "@pfw/core";
-import { IdempotencyConflictError, Store } from "./index";
+import { applyPatch, loadPolicy, tag, type OriginKind, type ResolvedIntent } from "@pfw/core";
+import { IdempotencyConflictError, PolicyConflictError, Store } from "./index";
 
 const policy = loadPolicy(readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8"));
 
@@ -226,6 +226,46 @@ describe("dashboard queries", () => {
     expect(rec.execution?.reference).toBe("B1");
     expect(rec.audit.map((e) => e.type)).toEqual(["decision", "execution"]);
     expect(store.getDecisionRecord("missing")).toBeNull();
+  });
+});
+
+describe("policy versions", () => {
+  test("there is no active stored policy until one is activated", () => {
+    expect(store.activePolicy()).toBeNull();
+    expect(store.listPolicyVersions()).toEqual([]);
+  });
+  test("activating records who, why, and the exact document, in the audit log", () => {
+    const next = applyPatch(policy, { approvalThreshold: 20_000 });
+    const active = store.activatePolicy({ baseVersion: 1, doc: next, confirmedBy: "dana@company.example", sourceText: "approve anything over $200", patch: { approvalThreshold: 20_000 } });
+    expect(active).toMatchObject({ version: 2, approvalThreshold: 20_000 });
+    expect(store.activePolicy()?.hash).toBe(active.hash);
+    const [v] = store.listPolicyVersions();
+    expect(v).toMatchObject({ version: 2, active: true, confirmedBy: "dana@company.example", sourceText: "approve anything over $200" });
+    const entry = store.audit.entries().find((e) => e.type === "policy_activated");
+    expect(entry?.payload).toMatchObject({ version: 2, confirmedBy: "dana@company.example", sourceText: "approve anything over $200" });
+    expect(store.audit.verify().ok).toBe(true);
+  });
+  test("later decisions use the new version and record its hash", () => {
+    const next = applyPatch(policy, { approvalThreshold: 1_000 });
+    const active = store.activatePolicy({ baseVersion: 1, doc: next, confirmedBy: "dana" });
+    const d = store.decide(intent({ idempotencyKey: "pv" }), active).decision;
+    expect(d.verdict).toBe("require_approval");
+    expect(d.policy).toMatchObject({ version: 2, hash: active.hash });
+  });
+  test("a stale base version, a skipped version and a missing confirmer are conflicts", () => {
+    const v2 = applyPatch(policy, { approvalThreshold: 20_000 });
+    store.activatePolicy({ baseVersion: 1, doc: v2, confirmedBy: "dana" });
+    expect(() => store.activatePolicy({ baseVersion: 1, doc: applyPatch(policy, { approvalThreshold: 30_000 }), confirmedBy: "eve" })).toThrow(PolicyConflictError);
+    expect(() => store.activatePolicy({ baseVersion: 2, doc: { ...v2, version: 9 }, confirmedBy: "eve" })).toThrow(/version 3/);
+    expect(() => store.activatePolicy({ baseVersion: 2, doc: applyPatch(v2, { approvalThreshold: 1 }), confirmedBy: "  " })).toThrow(/required/);
+    expect(store.listPolicyVersions()).toHaveLength(1);
+  });
+  test("only one version is active and older ones are kept", () => {
+    const v2 = applyPatch(policy, { approvalThreshold: 20_000 });
+    store.activatePolicy({ baseVersion: 1, doc: v2, confirmedBy: "dana" });
+    store.activatePolicy({ baseVersion: 2, doc: applyPatch(v2, { approvalThreshold: 30_000 }), confirmedBy: "dana" });
+    const all = store.listPolicyVersions();
+    expect(all.map((v) => [v.version, v.active])).toEqual([[3, true], [2, false]]);
   });
 });
 
