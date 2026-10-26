@@ -1,7 +1,9 @@
-import { api } from "./api";
+import { useState } from "react";
+import { api, operatorToken } from "./api";
 import { Activity } from "./screens/Activity";
 import { Approvals } from "./screens/Approvals";
 import { PolicyScreen } from "./screens/Policy";
+import { RegistryScreen } from "./screens/Registry";
 import { Replay } from "./screens/Replay";
 import { usePoll, useHashRoute } from "./hooks";
 import { shortHash } from "./labels";
@@ -9,6 +11,7 @@ import { shortHash } from "./labels";
 const TABS = [
   { to: "/activity", label: "Live activity" },
   { to: "/approvals", label: "Approvals" },
+  { to: "/registry", label: "Registry" },
   { to: "/policy", label: "Policy & scorecard" },
 ] as const;
 
@@ -39,6 +42,7 @@ export function App() {
           ))}
         </nav>
         <div className="statusbar">
+          {status && !status.openOperator && <OperatorSignIn />}
           {status && (
             <>
               <span className={`status-chip ${status.mode === "sandbox" ? "ok" : "warn"}`} title={status.mode === "sandbox" ? "Payments go to the PayPal sandbox" : "No PayPal credentials: payments are simulated inside the server"}>
@@ -66,6 +70,8 @@ export function App() {
           <Replay id={decodeURIComponent(decisionMatch[1]!)} back={() => go("/activity")} open={go} />
         ) : route === "/approvals" ? (
           <Approvals open={go} onChange={refresh} />
+        ) : route === "/registry" ? (
+          <RegistryScreen />
         ) : route === "/policy" ? (
           <PolicyScreen />
         ) : (
@@ -77,5 +83,39 @@ export function App() {
         Open source (MIT). The LLM plans and explains; it never decides whether money moves.
       </footer>
     </>
+  );
+}
+
+/** Approving and activating policies need the operator token when the server is not in open demo mode. */
+function OperatorSignIn() {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState("");
+  const [signedIn, setSignedIn] = useState(Boolean(operatorToken.get()));
+
+  if (signedIn && !open) {
+    return (
+      <button className="status-chip ok chip-button" onClick={() => { operatorToken.set(""); setSignedIn(false); setValue(""); }} title="Forget the operator token in this tab">
+        Operator signed in · sign out
+      </button>
+    );
+  }
+  if (!open) {
+    return <button className="status-chip warn chip-button" onClick={() => setOpen(true)}>Operator sign-in</button>;
+  }
+  return (
+    <form
+      className="signin"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!value.trim()) return;
+        operatorToken.set(value.trim());
+        setSignedIn(true);
+        setOpen(false);
+      }}
+    >
+      <input type="password" autoFocus value={value} onChange={(e) => setValue(e.target.value)} placeholder="Operator token" aria-label="Operator token" autoComplete="off" />
+      <button className="btn primary" type="submit">Use token</button>
+      <button className="btn" type="button" onClick={() => setOpen(false)}>Cancel</button>
+    </form>
   );
 }

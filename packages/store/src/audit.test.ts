@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { loadPolicy, tag, type OriginKind, type ResolvedIntent } from "@pfw/core";
-import { Store, createSigner } from "./index";
+import { Store, createSigner, verifyAuditExport } from "./index";
 
 const policy = loadPolicy(readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8"));
 const f = <T>(kind: OriginKind, value: T) => tag(value, { kind, ref: `${kind}:test` });
@@ -32,6 +32,42 @@ const fill = () => {
   store.saveExecution("k1", { state: "executed", retryable: false, payload: { reference: "B1" } });
 };
 const dropTriggers = () => store.db.exec("DROP TRIGGER audit_no_update; DROP TRIGGER audit_no_delete;");
+
+describe("offline verification of an export", () => {
+  test("a faithful export verifies without the database, and carries the signing keys", () => {
+    fill();
+    const exp = store.audit.exportAll();
+    expect(exp.entries).toHaveLength(3);
+    expect(exp.keys).toHaveLength(1);
+    expect(verifyAuditExport(JSON.parse(JSON.stringify(exp)))).toMatchObject({ ok: true, count: 3 });
+  });
+  test("an empty export verifies", () => expect(verifyAuditExport(store.audit.exportAll())).toEqual({ ok: true, count: 0, head: null }));
+  test("editing, removing, reordering or re-signing entries in the file is caught", () => {
+    fill();
+    const base = JSON.parse(JSON.stringify(store.audit.exportAll())) as ReturnType<typeof store.audit.exportAll>;
+    const edit = structuredClone(base);
+    (edit.entries[1]!.payload as { decision: { verdict: string } }).decision.verdict = "allow";
+    expect(verifyAuditExport(edit)).toMatchObject({ ok: false, seq: 2 });
+    const middle = structuredClone(base);
+    middle.entries.splice(1, 1);
+    expect(verifyAuditExport(middle)).toMatchObject({ ok: false, seq: 2 });
+    const swap = structuredClone(base);
+    [swap.entries[0], swap.entries[1]] = [swap.entries[1]!, swap.entries[0]!];
+    expect(verifyAuditExport(swap).ok).toBe(false);
+    const wrongKey = structuredClone(base);
+    wrongKey.keys = [{ keyId: wrongKey.keys[0]!.keyId, publicKeyPem: createSigner().publicKeyPem }];
+    expect(verifyAuditExport(wrongKey)).toMatchObject({ ok: false, reason: "signature is invalid" });
+  });
+  test("dropping the newest entries is caught against a head recorded earlier, but not against the export's own head", () => {
+    fill();
+    const recorded = store.audit.head()!;
+    const cut = JSON.parse(JSON.stringify(store.audit.exportAll())) as ReturnType<typeof store.audit.exportAll>;
+    cut.entries.pop();
+    cut.head = { seq: cut.entries.at(-1)!.seq, hash: cut.entries.at(-1)!.hash }; // a tamperer fixes the export's own head too
+    expect(verifyAuditExport(cut).ok).toBe(true);
+    expect(verifyAuditExport(cut, recorded)).toMatchObject({ ok: false });
+  });
+});
 
 describe("audit log", () => {
   test("records every decision (including denials) and executions in a verifiable chain", () => {

@@ -1,6 +1,9 @@
 export {
   Store,
   IdempotencyConflictError,
+  RegistryError,
+  type PurchaseOrderRecord,
+  type VendorChange,
   PolicyConflictError,
   type PolicyVersionRecord,
   ApprovalStateError,
@@ -17,4 +20,4 @@ export {
   type ResolveApprovalResult,
   type StoreOptions,
 } from "./store";
-export { AuditLog, GENESIS_HASH, createSigner, type AuditEntry, type AuditVerification, type Signer } from "./audit";
+export { AuditLog, GENESIS_HASH, createSigner, verifyAuditExport, type AuditEntry, type AuditExport, type AuditVerification, type Signer } from "./audit";

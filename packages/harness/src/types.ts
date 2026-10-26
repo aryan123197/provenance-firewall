@@ -96,6 +96,8 @@ export interface Scenario {
   kind: "attack" | "legit";
   request: string;
   userFields?: { payee?: string; account?: string; amount?: number; category?: string };
+  /** Extra registered vendors beyond the standard fixtures, for scenarios built from live data. */
+  vendors?: VendorRecord[];
   purchaseOrders: PurchaseOrder[];
   documents: Doc[];
   tasks: Task[];

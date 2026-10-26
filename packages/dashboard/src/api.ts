@@ -18,6 +18,27 @@ export interface Status {
   pendingApprovals: number;
 }
 
+export interface Vendor {
+  id: string;
+  name: string;
+  account: string;
+  category: string;
+}
+
+export interface PurchaseOrderRow {
+  id: string;
+  vendorId: string;
+  amount: number;
+  currency: string;
+  status: "open" | "closed";
+}
+
+export interface VendorChange {
+  before: Vendor | null;
+  after: Vendor;
+  accountChanged: boolean;
+}
+
 export interface PolicyTestResult {
   id: string;
   group: string;
@@ -105,10 +126,39 @@ export type ApprovalResult =
   | { status: "rejected" | "needs_approval" | "denied" | "execution_failed" | "invalid" }
   | { status: "blocked"; reason: string };
 
+const TOKEN_KEY = "pfw.operatorToken";
+
+/** The operator token lives in this tab's session storage only: it is not persisted and not sent anywhere but our API. */
+export const operatorToken = {
+  get(): string {
+    try {
+      return sessionStorage.getItem(TOKEN_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  },
+  set(value: string) {
+    try {
+      if (value) sessionStorage.setItem(TOKEN_KEY, value);
+      else sessionStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* storage unavailable: the token lasts until reload via the in-memory fallback below */
+    }
+    memory = value;
+  },
+};
+let memory = "";
+const currentToken = () => operatorToken.get() || memory;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { ...init, headers: { "content-type": "application/json", ...(init?.headers ?? {}) } });
+  const token = init?.method === "POST" ? currentToken() : "";
+  const res = await fetch(path, {
+    ...init,
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}), ...(init?.headers ?? {}) },
+  });
   const text = await res.text();
   const body = text ? JSON.parse(text) : {};
+  if (res.status === 401) throw new Error("Operator sign-in required: enter the operator token in the header, then try again.");
   if (!res.ok) throw new Error((body as { error?: string }).error ?? `${res.status} ${res.statusText}`);
   return body as T;
 }
@@ -122,6 +172,10 @@ export const api = {
   approvals: () => request<{ approvals: Approval[] }>("/api/approvals").then((r) => r.approvals),
   resolve: (id: string, approve: boolean, approver: string, note: string) =>
     post<ApprovalResult>(`/api/approvals/${encodeURIComponent(id)}/${approve ? "approve" : "reject"}`, { approver, note: note || undefined }),
+  registry: () => request<{ vendors: Vendor[]; purchaseOrders: PurchaseOrderRow[] }>("/api/registry"),
+  saveVendor: (v: Vendor, changedBy: string) => post<VendorChange>("/api/registry/vendors", { ...v, changedBy }),
+  addPurchaseOrder: (po: { id: string; vendorId: string; amount: number; currency: string }, changedBy: string) =>
+    post<{ ok: true }>("/api/registry/purchase-orders", { ...po, changedBy }),
   drift: () => request<{ drift: Drift[] }>("/api/drift").then((r) => r.drift),
   policy: () => request<PolicyView>("/api/policy"),
   compilePolicy: (english: string) => post<CompileResult>("/api/policy/compile", { english }),

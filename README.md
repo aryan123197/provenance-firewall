@@ -28,7 +28,7 @@ agent ──proposes (handles)──▶ firewall ──allow / needs approval / 
 3. **No bypass.** The PayPal adapter accepts only an authorization (an HMAC over the exact values, decision and policy hash) that the firewall mints for an allowed intent or a person's approval. Forged or edited ones are rejected before any request.
 4. **Exactly once.** One decision per idempotency key; a stable `PayPal-Request-Id`; purchase orders close when paid, so a re-sent invoice is not paid twice.
 5. **Human approval** bound to one payment, single use, attributed, and unable to override a hard limit.
-6. **Signed audit trail and reconciliation.** Every decision, including denials, is an Ed25519-signed hash-chained entry. PayPal webhooks are verified and matched against it; payments we did not authorize show up as drift.
+6. **Signed audit trail and reconciliation.** Every decision, including denials, is an Ed25519-signed hash-chained entry. The whole log exports as one file that `pnpm verify:audit` checks offline, with no server (`curl localhost:3000/api/audit/export > audit.json && pnpm verify:audit audit.json <head-hash-you-recorded>`); the head hash is what catches entries removed from the end. PayPal webhooks are verified and matched against it; payments we did not authorize show up as drift.
 
 ## Where PayPal and the LLM are used
 
@@ -40,9 +40,9 @@ agent ──proposes (handles)──▶ firewall ──allow / needs approval / 
 | Piece | State |
 | --- | --- |
 | Provenance model, policy engine, idempotency, approvals, signed audit log, reconciliation | Implemented and tested (200+ tests, including property tests over tens of thousands of random intents) |
-| PayPal Payouts adapter | Implemented against PayPal's documented API and tested against an in-process fake. **It has not yet been run against the live PayPal sandbox.** |
+| PayPal Payouts and Invoicing adapters | Implemented against PayPal's documented APIs and tested against an in-process fake (including an injected invoice read through the Invoicing client and run through both agents). **Neither has yet been run against the live PayPal sandbox**, and the Invoicing field names in particular are from the documentation, not confirmed against live responses. |
 | Red-team harness and scorecard | Runs offline. Agent is a deterministic stand-in; payments are an in-process fake. |
-| Dashboard (activity, decision replay, approvals, policy and scorecard) | Implemented |
+| Dashboard (activity, decision replay, approvals, registry, policy and scorecard) | Implemented. Operator actions need the operator token, entered in the header. |
 | Plain-English policy authoring (compile, diff, generated tests, confirm, versioned in the audit log) | Implemented and tested with a fake model. **Not yet run against the live Claude API.** |
 | Claude-driven procurement agent (`pnpm harness:llm`, and the demo toggle) | Implemented and tested with a fake model. **Not yet run against the live Claude API, so there are no published numbers for a real model.** |
 
@@ -59,6 +59,8 @@ pnpm harness               # regenerate reports/scorecard.{md,json} (determinist
 pnpm build                 # build the dashboard
 pnpm dev:demo              # http://localhost:3000, simulated PayPal, demo scenarios, open approvals
 pnpm harness:llm           # same scenarios with a real Claude agent (needs ANTHROPIC_API_KEY; paid API calls)
+pnpm seed:invoices         # create a clean and an injected invoice in your PayPal sandbox (needs credentials)
+pnpm demo:invoices <ids>   # read them back and compare the unprotected agent with the firewalled one
 pnpm e2e                   # scripted payment (attack step runs offline; payout step needs sandbox credentials)
 ```
 
@@ -89,6 +91,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | `REGISTRY_PATH` | none | JSON `{ vendors, purchaseOrders }`, the operator-maintained registry |
 | `OPERATOR_TOKEN` | none | Bearer token required to approve or reject |
 | `ANTHROPIC_API_KEY` | none | Enables the policy compiler and the live Claude agent. `PFW_MODEL` overrides the model (default `claude-opus-5-5`). |
+| `LLM_DAILY_CALLS` | `300` | Hard cap on Claude API calls per UTC day, across the policy compiler and the live agent. Calls past it return 429. Held in memory, so a restart resets it. |
 | `OPEN_OPERATOR` | off | `1` lets anyone approve or reject. Public demos on simulated or sandbox money only. |
 | `DEMO_MODE` | off | `1` seeds demo vendors and mounts the scenario runner |
 | `AUTHORITY_KEY` | random per process | Shared secret between firewall and adapter |
@@ -107,7 +110,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | `packages/adapter` | `PaymentAdapter`, the authorization authority, the PayPal Payouts sandbox adapter, a fake PayPal for tests |
 | `packages/firewall` | Service that wires the above; the only path to PayPal |
 | `packages/server` | HTTP API, webhook endpoint, demo runner |
-| `packages/dashboard` | React + AG Grid operator dashboard |
+| `packages/dashboard` | React + AG Grid operator dashboard, including the vendor registry and purchase order screen |
 | `packages/llm` | Claude-backed procurement agent and plain-English policy compiler |
 | `packages/harness` | 24 attack and legitimate scenarios, baseline vs firewalled runner, scorecard |
 | `policies/` | Versioned policy files |

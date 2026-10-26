@@ -3,7 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, test } from "vitest";
 import { applyPatch, diffPolicy, lintPolicy, loadPolicy, runIntentExamples, runPolicyTests } from "@pfw/core";
 import type { AgentTools, PayArgs, PayResult } from "@pfw/harness";
-import { AGENT_TOOLS, AnthropicPolicyCompiler, LlmAgent, LlmRefusalError, toCompilerOutput, type MessagesClient } from "./index";
+import { AGENT_TOOLS, AnthropicPolicyCompiler, LlmAgent, LlmBudgetError, LlmRefusalError, toCompilerOutput, withDailyBudget, type MessagesClient } from "./index";
 
 const base = loadPolicy(readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8"));
 
@@ -207,5 +207,33 @@ describe("AnthropicPolicyCompiler", () => {
     await expect(c.compile("   ", base)).rejects.toThrow(/write the policy/);
     await expect(c.compile("x".repeat(4001), base)).rejects.toThrow(/too long/);
     expect(requests).toHaveLength(0);
+  });
+});
+
+describe("withDailyBudget", () => {
+  const ok = () => fakeClient(Array.from({ length: 10 }, () => ({ content: [text("hi")] }))).client;
+  const call = (c: MessagesClient) => c.messages.create({ model: "m", max_tokens: 1, messages: [{ role: "user", content: "x" }] });
+
+  test("allows up to the limit, then refuses without calling the API", async () => {
+    const inner = fakeClient(Array.from({ length: 10 }, () => ({ content: [text("hi")] })));
+    const c = withDailyBudget(inner.client, 2);
+    await call(c);
+    await call(c);
+    await expect(call(c)).rejects.toBeInstanceOf(LlmBudgetError);
+    expect(inner.requests).toHaveLength(2);
+    expect(c.used()).toBe(2);
+  });
+  test("the count resets on the next UTC day", async () => {
+    let now = new Date("2026-11-01T23:59:00Z");
+    const c = withDailyBudget(ok(), 1, () => now);
+    await call(c);
+    await expect(call(c)).rejects.toBeInstanceOf(LlmBudgetError);
+    now = new Date("2026-11-02T00:01:00Z");
+    await expect(call(c)).resolves.toBeDefined();
+  });
+  test("a budget error stops the agent and the compiler", async () => {
+    const c = withDailyBudget(fakeClient([{ stop_reason: "tool_use", content: [toolUse("t1", "find_vendor", { name: "x" })] }]).client, 1);
+    await expect(new LlmAgent({ client: c }).run([], tools().t)).rejects.toBeInstanceOf(LlmBudgetError);
+    await expect(new AnthropicPolicyCompiler(withDailyBudget(ok(), 0)).compile("x", base)).rejects.toBeInstanceOf(LlmBudgetError);
   });
 });

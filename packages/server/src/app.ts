@@ -16,8 +16,8 @@ import {
   type UnsupportedClause,
 } from "@pfw/core";
 import type { Firewall } from "@pfw/firewall";
-import { ApprovalStateError, PolicyConflictError, type Store } from "@pfw/store";
-import { LlmRefusalError, type PolicyCompiler } from "@pfw/llm";
+import { ApprovalStateError, PolicyConflictError, RegistryError, type Store } from "@pfw/store";
+import { LlmBudgetError, LlmRefusalError, type PolicyCompiler } from "@pfw/llm";
 import { z } from "zod";
 
 /** The live pieces. A getter is used so a demo reset can swap in a fresh database. */
@@ -47,7 +47,7 @@ export interface AppDeps {
   /** Directory of the built dashboard, served at `/`. */
   staticDir?: string;
   /** Extra routes, registered under /api (the demo agent lives here). */
-  extend?: (app: FastifyInstance) => void;
+  extend?: (app: FastifyInstance, guard: (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>) => void;
 }
 
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -124,6 +124,38 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.post<{ Params: { id: string }; Body: { approver?: string; note?: string } }>("/api/approvals/:id/approve", { preHandler: requireOperator }, resolve(true));
   app.post<{ Params: { id: string }; Body: { approver?: string; note?: string } }>("/api/approvals/:id/reject", { preHandler: requireOperator }, resolve(false));
 
+  // ---- Vendor registry and purchase orders: the operator's trust anchor ----
+  app.get("/api/registry", async () => {
+    const { store } = deps.runtime();
+    return { vendors: store.listVendors(), purchaseOrders: store.listPurchaseOrders() };
+  });
+
+  const registryBody = z.object({ changedBy: z.string() });
+  app.post<{ Body: Record<string, unknown> }>("/api/registry/vendors", { preHandler: requireOperator }, async (req, reply) => {
+    const parsed = registryBody.extend({ id: z.string(), name: z.string(), account: z.string(), category: z.string() }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "id, name, account, category and changedBy are all required." });
+    const { changedBy, ...vendor } = parsed.data;
+    try {
+      return deps.runtime().store.changeVendor(vendor, changedBy);
+    } catch (e) {
+      if (e instanceof RegistryError) return reply.code(400).send({ error: e.message });
+      throw e;
+    }
+  });
+
+  app.post<{ Body: Record<string, unknown> }>("/api/registry/purchase-orders", { preHandler: requireOperator }, async (req, reply) => {
+    const parsed = registryBody.extend({ id: z.string(), vendorId: z.string(), amount: z.number(), currency: z.string() }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "id, vendorId, amount (in cents), currency and changedBy are all required." });
+    const { changedBy, ...po } = parsed.data;
+    try {
+      deps.runtime().store.changePurchaseOrder(po, changedBy);
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof RegistryError) return reply.code(400).send({ error: e.message });
+      throw e;
+    }
+  });
+
   app.get("/api/drift", async () => ({ drift: deps.runtime().store.listDrift() }));
 
   app.get("/api/policy", async () => {
@@ -167,7 +199,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
     };
   };
 
-  app.post<{ Body: { english?: string } }>("/api/policy/compile", async (req, reply) => {
+  app.post<{ Body: { english?: string } }>("/api/policy/compile", { preHandler: requireOperator }, async (req, reply) => {
     if (!deps.compiler) return reply.code(503).send({ error: "Plain-English policies need a Claude API key (ANTHROPIC_API_KEY) on the server." });
     const english = req.body?.english;
     if (typeof english !== "string" || !english.trim()) return reply.code(400).send({ error: "Write the policy you want first." });
@@ -176,6 +208,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
       const out = await deps.compiler.compile(english, active);
       return { baseVersion: active.version, english, summary: out.summary, patch: out.patch, unsupported: out.unsupported, examples: out.examples, ...review(active, out.patch, out.examples) };
     } catch (e) {
+      if (e instanceof LlmBudgetError) return reply.code(429).send({ error: e.message });
       if (e instanceof LlmRefusalError) return reply.code(422).send({ error: e.message });
       if (e instanceof z.ZodError) return reply.code(422).send({ error: "The compiled policy was not valid, so it was discarded. Try rephrasing." });
       return reply.code(502).send({ error: e instanceof Error ? e.message : "The compiler failed." });
@@ -223,6 +256,11 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.get<{ Querystring: { after?: string; limit?: string } }>("/api/audit", async (req) => ({
     entries: deps.runtime().store.audit.entries({ after: Number(req.query.after ?? 0) || 0, limit: Math.min(Number(req.query.limit ?? 200) || 200, 1000) }),
   }));
+  // Everything needed to verify the log offline: `pnpm verify:audit <file>` checks it without trusting this server.
+  app.get("/api/audit/export", async (_req, reply) => {
+    reply.header("content-disposition", 'attachment; filename="audit-export.json"');
+    return deps.runtime().store.audit.exportAll();
+  });
   app.get("/api/audit/verify", async () => deps.runtime().store.audit.verify());
 
   app.get("/api/scorecard", async (_req, reply) => {
@@ -237,7 +275,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
     return reply.code(out.status === "rejected" ? 400 : 200).send(out);
   });
 
-  deps.extend?.(app);
+  deps.extend?.(app, requireOperator);
 
   if (deps.staticDir && existsSync(deps.staticDir)) {
     void app.register(fastifyStatic, { root: deps.staticDir });

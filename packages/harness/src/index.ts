@@ -6,3 +6,4 @@ export { CLOCK, runBaseline, runFirewalled, runOnFirewall, type FirewalledEnv, t
 export { scoreRun, summarize, type ScenarioResult, type Scorecard, type SideScore } from "./score";
 export { renderMarkdown } from "./report";
 export { runAll, type ScenarioRun } from "./run";
+export { invoiceDocFromPayPal, scenarioFromInvoices, type LiveInvoiceOptions } from "./live-invoices";

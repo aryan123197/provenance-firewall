@@ -21,6 +21,7 @@ beforeEach(() => {
     host: "127.0.0.1",
     authorityKey: "test-authority-key-0123456789",
     openOperator: true,
+    llmDailyCalls: 300,
     demo: true,
   });
 });
@@ -55,6 +56,21 @@ describe("demo mode", () => {
     expect((await server.app.inject({ method: "POST", url: "/api/demo/reset" })).statusCode).toBe(200);
     expect(((await server.app.inject({ url: "/api/decisions" })).json() as { decisions: unknown[] }).decisions).toHaveLength(0);
     await run("legit-po-match"); // vendors and purchase orders are seeded again
+  });
+  test("a demo run never overwrites the operator's registry, so an account change makes the old invoice a payee swap", async () => {
+    await run("legit-po-match");
+    const change = await server.app.inject({
+      method: "POST",
+      url: "/api/registry/vendors",
+      payload: { id: "acme", name: "Acme Supplies", account: "new-account@acme.example", category: "office_supplies", changedBy: "dana@company.example" },
+    });
+    expect(change.json()).toMatchObject({ accountChanged: true });
+    const again = await run("legit-po-match");
+    expect(again.firewalled.score).toMatchObject({ denied: 1, unauthorizedPayouts: 0 });
+    const vendors = ((await server.app.inject({ url: "/api/registry" })).json() as { vendors: { id: string; account: string }[] }).vendors;
+    expect(vendors.find((v) => v.id === "acme")?.account).toBe("new-account@acme.example");
+    const changes = ((await server.app.inject({ url: "/api/audit" })).json() as { entries: { type: string }[] }).entries.filter((e) => e.type === "vendor_changed");
+    expect(changes).toHaveLength(1);
   });
   test("unknown scenarios 404", async () => {
     expect((await server.app.inject({ method: "POST", url: "/api/demo/run", payload: { scenarioId: "nope" } })).statusCode).toBe(404);

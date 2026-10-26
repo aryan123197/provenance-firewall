@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test } from "vitest";
 import type { PolicyDoc } from "@pfw/core";
 import type { Agent } from "@pfw/harness";
-import type { CompilerOutput, PolicyCompiler } from "@pfw/llm";
+import { LlmBudgetError, LlmRefusalError, type CompilerOutput, type MessagesClient, type PolicyCompiler } from "@pfw/llm";
+import { verifyAuditExport } from "@pfw/store";
 import { buildServer, type Server } from "./server";
 
 const policyPath = new URL("../../../policies/default.policy.yaml", import.meta.url).pathname;
@@ -34,6 +35,7 @@ const build = (extra: Partial<Parameters<typeof buildServer>[0]> = {}, withCompi
     authorityKey: "test-authority-key-0123456789",
     operatorToken: "s3cret-operator-token",
     openOperator: false,
+    llmDailyCalls: 300,
     demo: false,
     llm: null,
     ...(withCompiler ? { compiler: { compile: async (english, active) => (calls.push({ english, active }), output) } satisfies PolicyCompiler } : {}),
@@ -47,7 +49,7 @@ beforeEach(() => {
 });
 
 const compile = async (english = "contractors under $500, never pay new vendors on weekends") => {
-  const r = await server.app.inject({ method: "POST", url: "/api/policy/compile", payload: { english } });
+  const r = await server.app.inject({ method: "POST", url: "/api/policy/compile", headers: op, payload: { english } });
   return { status: r.statusCode, body: r.json() as Record<string, any> };
 };
 const activate = (body: Record<string, unknown>, headers: Record<string, string> = op) =>
@@ -67,7 +69,7 @@ describe("compile", () => {
   });
   test("without an API key the endpoint says what is missing", async () => {
     const bare = build({}, false);
-    const r = await bare.app.inject({ method: "POST", url: "/api/policy/compile", payload: { english: "x" } });
+    const r = await bare.app.inject({ method: "POST", url: "/api/policy/compile", headers: op, payload: { english: "x" } });
     expect(r.statusCode).toBe(503);
     expect(r.json()).toMatchObject({ error: expect.stringContaining("ANTHROPIC_API_KEY") });
     expect((await bare.app.inject({ url: "/api/status" })).json()).toMatchObject({ compilerAvailable: false, llmAgentAvailable: false });
@@ -77,7 +79,7 @@ describe("compile", () => {
     output = { ...SPEC_OUTPUT, patch: { newPayeeDenyDays: [9] } };
     expect((await compile()).status).toBe(422);
     const broken = build({ compiler: { compile: async () => { throw new Error("upstream down"); } } });
-    const r = await broken.app.inject({ method: "POST", url: "/api/policy/compile", payload: { english: "x" } });
+    const r = await broken.app.inject({ method: "POST", url: "/api/policy/compile", headers: op, payload: { english: "x" } });
     expect(r.statusCode).toBe(502);
   });
   test("unsupported clauses are returned for the reviewer, never guessed into rules", async () => {
@@ -91,6 +93,14 @@ describe("compile", () => {
     const { body } = await compile();
     expect(body.canActivate).toBe(false);
     expect(body.tests.filter((t: { passed: boolean }) => !t.passed).map((t: { description: string }) => t.description)).toContain("A contractor invoice of $500.00 is paid");
+  });
+});
+
+describe("compile needs the operator token, because it spends the API budget", () => {
+  test("refused without it, and the compiler is never called", async () => {
+    const r = await server.app.inject({ method: "POST", url: "/api/policy/compile", payload: { english: "x" } });
+    expect(r.statusCode).toBe(401);
+    expect(calls).toHaveLength(0);
   });
 });
 
@@ -145,20 +155,117 @@ describe("activate", () => {
   });
 });
 
+describe("registry endpoints", () => {
+  const vendor = { id: "gamma", name: "Gamma Consulting", account: "gamma@sandbox.example", category: "contractors", changedBy: "dana@company.example" };
+  const post = (url: string, payload: Record<string, unknown>, headers: Record<string, string> = op) => server.app.inject({ method: "POST", url, headers, payload });
+
+  test("reading is open; writing needs the operator token", async () => {
+    expect((await server.app.inject({ url: "/api/registry" })).statusCode).toBe(200);
+    expect((await post("/api/registry/vendors", vendor, {})).statusCode).toBe(401);
+    expect((await post("/api/registry/purchase-orders", { id: "po-1", vendorId: "gamma", amount: 1, currency: "USD", changedBy: "d" }, {})).statusCode).toBe(401);
+  });
+  test("adding a vendor and an order shows up in the registry and the audit log", async () => {
+    expect((await post("/api/registry/vendors", vendor)).json()).toMatchObject({ accountChanged: false, after: { id: "gamma" } });
+    expect((await post("/api/registry/purchase-orders", { id: "po-g1", vendorId: "gamma", amount: 25_000, currency: "USD", changedBy: "dana" })).statusCode).toBe(200);
+    const reg = (await server.app.inject({ url: "/api/registry" })).json() as { vendors: { id: string }[]; purchaseOrders: { id: string; status: string }[] };
+    expect(reg.vendors.map((v) => v.id)).toContain("gamma");
+    expect(reg.purchaseOrders[0]).toMatchObject({ id: "po-g1", status: "open" });
+    const types = ((await server.app.inject({ url: "/api/audit" })).json() as { entries: { type: string }[] }).entries.map((e) => e.type);
+    expect(types).toEqual(["vendor_changed", "purchase_order_added"]);
+  });
+  test("an account change is reported as such", async () => {
+    await post("/api/registry/vendors", vendor);
+    const r = await post("/api/registry/vendors", { ...vendor, account: "gamma-new@sandbox.example" });
+    expect(r.json()).toMatchObject({ accountChanged: true, before: { account: "gamma@sandbox.example" } });
+  });
+  test("invalid input is a 400 with the reason, and missing fields too", async () => {
+    const bad = await post("/api/registry/vendors", { ...vendor, account: "nope" });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toMatchObject({ error: expect.stringContaining("account") });
+    expect((await post("/api/registry/vendors", { id: "x" })).statusCode).toBe(400);
+    expect((await post("/api/registry/purchase-orders", { id: "po-z", vendorId: "ghost", amount: 1, currency: "USD", changedBy: "d" })).statusCode).toBe(400);
+  });
+});
+
+describe("demo routes need the operator token unless the server is in open demo mode", () => {
+  test("run and reset are refused without it and work with it", async () => {
+    const d = build({ demo: true });
+    expect((await d.app.inject({ method: "POST", url: "/api/demo/run", payload: { scenarioId: "legit-po-match" } })).statusCode).toBe(401);
+    expect((await d.app.inject({ method: "POST", url: "/api/demo/reset" })).statusCode).toBe(401);
+    expect((await d.app.inject({ method: "POST", url: "/api/demo/run", headers: { authorization: "Bearer wrong" }, payload: { scenarioId: "legit-po-match" } })).statusCode).toBe(401);
+    expect(((await d.app.inject({ url: "/api/decisions" })).json() as { decisions: unknown[] }).decisions).toHaveLength(0);
+    expect((await d.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match" } })).statusCode).toBe(200);
+    expect((await d.app.inject({ method: "POST", url: "/api/demo/reset", headers: op })).statusCode).toBe(200);
+  });
+  test("listing scenarios stays public", async () => {
+    expect((await build({ demo: true }).app.inject({ url: "/api/demo/scenarios" })).statusCode).toBe(200);
+  });
+});
+
 describe("demo runner with a live agent", () => {
   const live: Agent = { name: "fake-llm", kind: "llm", run: async () => undefined };
 
   test("agent: llm is refused when no key is configured, and allowed when one is", async () => {
     const noKey = build({ demo: true });
-    expect((await noKey.app.inject({ method: "POST", url: "/api/demo/run", payload: { scenarioId: "legit-po-match", agent: "llm" } })).statusCode).toBe(503);
+    expect((await noKey.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match", agent: "llm" } })).statusCode).toBe(503);
     const withKey = build({ demo: true, llmAgent: live });
-    const r = await withKey.app.inject({ method: "POST", url: "/api/demo/run", payload: { scenarioId: "legit-po-match", agent: "llm" } });
+    const r = await withKey.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match", agent: "llm" } });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ agent: "fake-llm", agentKind: "llm" });
     expect((await withKey.app.inject({ url: "/api/status" })).json()).toMatchObject({ llmAgentAvailable: true });
   });
   test("the scripted agent stays the default", async () => {
     const d = build({ demo: true });
-    expect((await d.app.inject({ method: "POST", url: "/api/demo/run", payload: { scenarioId: "legit-po-match" } })).json()).toMatchObject({ agent: "gullible-scripted", agentKind: "scripted" });
+    expect((await d.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match" } })).json()).toMatchObject({ agent: "gullible-scripted", agentKind: "scripted" });
   });
 });
+
+describe("the Claude budget and agent failures reach the client as clear errors", () => {
+  const failing = (e: Error): Agent => ({ name: "failing-llm", kind: "llm", run: async () => { throw e; } });
+  const run = async (agent: Agent) => {
+    const s = build({ demo: true, llmAgent: agent });
+    return s.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match", agent: "llm" } });
+  };
+
+  test("an exhausted daily budget is a 429", async () => {
+    const r = await run(failing(new LlmBudgetError(5)));
+    expect(r.statusCode).toBe(429);
+    expect(r.json()).toMatchObject({ error: expect.stringContaining("daily limit") });
+  });
+  test("a model refusal is a 422 and any other agent failure is a 502 naming the cause", async () => {
+    expect((await run(failing(new LlmRefusalError("cyber")))).statusCode).toBe(422);
+    const r = await run(failing(new Error("upstream overloaded")));
+    expect(r.statusCode).toBe(502);
+    expect(r.json()).toMatchObject({ error: expect.stringContaining("upstream overloaded") });
+  });
+  test("the compile endpoint maps a budget error to 429", async () => {
+    const s = build({}, false);
+    const budgeted = build({ compiler: { compile: async () => { throw new LlmBudgetError(5); } } }, false);
+    expect((await budgeted.app.inject({ method: "POST", url: "/api/policy/compile", headers: op, payload: { english: "x" } })).statusCode).toBe(429);
+    void s;
+  });
+  test("the server wraps its Claude client in the configured daily budget", async () => {
+    const calls: number[] = [];
+    const client: MessagesClient = { messages: { async create() { calls.push(1); throw new Error("stop"); } } };
+    const s = build({ llm: client, llmDailyCalls: 1 }, false);
+    const compile = () => s.app.inject({ method: "POST", url: "/api/policy/compile", headers: op, payload: { english: "approve over $2k" } });
+    expect((await compile()).statusCode).toBe(502); // first call reaches the (failing) client
+    expect((await compile()).statusCode).toBe(429); // second is stopped by the budget
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("audit export", () => {
+  test("the export downloads as a file and verifies offline, and a doctored copy does not", async () => {
+    await post0("/api/registry/vendors", { id: "zeta", name: "Zeta Co", account: "zeta@sandbox.example", category: "software", changedBy: "dana" });
+    const res = await server.app.inject({ url: "/api/audit/export" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-disposition"]).toContain("audit-export.json");
+    const exp = res.json() as Parameters<typeof verifyAuditExport>[0];
+    expect(verifyAuditExport(exp)).toMatchObject({ ok: true, count: 1 });
+    (exp.entries[0]!.payload as { changedBy: string }).changedBy = "someone-else";
+    expect(verifyAuditExport(exp).ok).toBe(false);
+  });
+});
+
+const post0 = (url: string, payload: Record<string, unknown>) => server.app.inject({ method: "POST", url, headers: op, payload });

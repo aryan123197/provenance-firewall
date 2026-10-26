@@ -144,7 +144,7 @@ export function Replay({ id, back, open }: { id: string; back: () => void; open:
             </tbody>
           </table>
         )}
-        <p className="hint">Each entry includes the hash of the one before it and an Ed25519 signature, so any edit or removal shows up.</p>
+        <p className="hint">Each entry includes the hash of the one before it and an Ed25519 signature, so any edit or removal shows up. <a href="/api/audit/export" download>Download the full log</a> and check it yourself with <code>pnpm verify:audit</code>, without trusting this server.</p>
       </Card>
     </div>
   );

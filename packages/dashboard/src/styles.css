@@ -280,3 +280,26 @@ textarea:disabled, input:disabled { opacity: 0.6; }
 .versions summary { cursor: pointer; color: var(--muted); font-weight: 600; }
 .versions ol { padding-left: 18px; }
 .versions blockquote { margin: 4px 0 8px; padding-left: 10px; border-left: 3px solid var(--border); color: var(--muted); }
+
+.chip-button { cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; }
+.signin { display: flex; gap: 6px; align-items: center; }
+.signin input { padding: 4px 8px; width: 150px; }
+.signin .btn { padding: 4px 10px; font-size: 13px; }
+
+.notices { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.notices li { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 8px; font-weight: 600; }
+.notices li.ok { background: var(--allow-bg); color: var(--allow); }
+.notices li.bad { background: var(--deny-bg); color: var(--deny); }
+.notices .link { color: inherit; font-weight: 500; }
+
+/* registry */
+.registry td, .registry th { font-size: 14px; }
+.form-title { margin: 20px 0 10px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.banner .check { margin-top: 8px; font-weight: 500; }
+
+.ag-cell a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.ag-cell a:hover { text-decoration: underline; }
+
+.skip-inline { position: absolute; left: -9999px; }
+.skip-inline:focus { position: static; display: inline-block; margin-bottom: 10px; font-weight: 600; }

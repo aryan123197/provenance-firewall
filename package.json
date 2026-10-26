@@ -19,7 +19,10 @@
     "dev:demo": "DEMO_MODE=1 OPEN_OPERATOR=1 DATABASE_PATH=:memory: tsx packages/server/src/main.ts",
     "build": "pnpm --filter @pfw/dashboard build",
     "gen:audit-key": "tsx scripts/gen-audit-key.ts",
-    "harness:llm": "tsx scripts/harness-llm.ts"
+    "harness:llm": "tsx scripts/harness-llm.ts",
+    "seed:invoices": "tsx scripts/seed-invoices.ts",
+    "demo:invoices": "tsx scripts/demo-invoices.ts",
+    "verify:audit": "tsx scripts/verify-audit.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

@@ -107,37 +107,56 @@ export class AuditLog {
     return (this.db.prepare("SELECT seq, hash FROM audit_log ORDER BY seq DESC LIMIT 1").get() as { seq: number; hash: string } | undefined) ?? null;
   }
 
+  /** Every entry, every signing key and the current head: all a third party needs to check the log without the server. */
+  exportAll(): AuditExport {
+    const rows = this.db.prepare("SELECT * FROM audit_log ORDER BY seq").all() as Row[];
+    const keys = this.db.prepare("SELECT key_id, public_pem FROM audit_keys ORDER BY key_id").all() as { key_id: string; public_pem: string }[];
+    return { version: 1, entries: rows.map(auditRowToEntry), keys: keys.map((k) => ({ keyId: k.key_id, publicKeyPem: k.public_pem })), head: this.head() };
+  }
+
   /**
    * Checks sequence, chain links, hashes and signatures. Detects edits, inserted rows and removed rows in the middle.
    * Removing the newest rows is only detectable against a head (seq + hash) recorded elsewhere, so pass `expectedHead`.
    */
   verify(expectedHead?: { seq: number; hash: string }): AuditVerification {
-    const keys = new Map(
-      (this.db.prepare("SELECT key_id, public_pem FROM audit_keys").all() as { key_id: string; public_pem: string }[]).map((k) => [
-        k.key_id,
-        createPublicKey(k.public_pem),
-      ]),
-    );
-    let prev = GENESIS_HASH;
-    let expectSeq = 1;
-    let count = 0;
-    for (const r of this.db.prepare("SELECT * FROM audit_log ORDER BY seq").iterate() as IterableIterator<Row>) {
-      if (r.seq !== expectSeq) return { ok: false, seq: expectSeq, reason: "missing or out-of-order entry" };
-      if (r.prev_hash !== prev) return { ok: false, seq: r.seq, reason: "chain link does not match the previous entry" };
-      const recomputed = hashOf({ seq: r.seq, ts: r.ts, type: r.type, payloadJson: r.payload_json, prevHash: r.prev_hash, keyId: r.key_id });
-      if (recomputed !== r.hash) return { ok: false, seq: r.seq, reason: "entry contents do not match their hash" };
-      const key = keys.get(r.key_id);
-      if (!key || !verify(null, Buffer.from(r.hash, "hex"), key, Buffer.from(r.signature, "base64"))) {
-        return { ok: false, seq: r.seq, reason: "signature is invalid" };
-      }
-      prev = r.hash;
-      expectSeq++;
-      count++;
-    }
-    const head = count ? { seq: expectSeq - 1, hash: prev } : null;
-    if (expectedHead && (head?.seq !== expectedHead.seq || head.hash !== expectedHead.hash)) {
-      return { ok: false, seq: expectedHead.seq, reason: "log head does not match the expected head (entries removed or replaced)" };
-    }
-    return { ok: true, count, head };
+    return verifyAuditExport(this.exportAll(), expectedHead);
   }
+}
+
+export interface AuditExport {
+  version: 1;
+  entries: AuditEntry[];
+  keys: { keyId: string; publicKeyPem: string }[];
+  head: { seq: number; hash: string } | null;
+}
+
+/**
+ * Pure check of an exported log: no database, no server. The keys come from the export itself, so this proves the entries
+ * are consistent and were signed by those keys; it cannot prove those keys are the operator's. Compare a key id with one
+ * published elsewhere (or the head, via `expectedHead`) to close that gap.
+ */
+export function verifyAuditExport(exp: AuditExport, expectedHead?: { seq: number; hash: string }): AuditVerification {
+  const keys = new Map(exp.keys.map((k) => [k.keyId, createPublicKey(k.publicKeyPem)]));
+  let prev = GENESIS_HASH;
+  let expectSeq = 1;
+  let count = 0;
+  for (const r of exp.entries) {
+    if (r.seq !== expectSeq) return { ok: false, seq: expectSeq, reason: "missing or out-of-order entry" };
+    if (r.prevHash !== prev) return { ok: false, seq: r.seq, reason: "chain link does not match the previous entry" };
+    const recomputed = hashOf({ seq: r.seq, ts: r.ts, type: r.type, payloadJson: canonicalJson(r.payload), prevHash: r.prevHash, keyId: r.keyId });
+    if (recomputed !== r.hash) return { ok: false, seq: r.seq, reason: "entry contents do not match their hash" };
+    const key = keys.get(r.keyId);
+    if (!key || !verify(null, Buffer.from(r.hash, "hex"), key, Buffer.from(r.signature, "base64"))) {
+      return { ok: false, seq: r.seq, reason: "signature is invalid" };
+    }
+    prev = r.hash;
+    expectSeq++;
+    count++;
+  }
+  const head = count ? { seq: expectSeq - 1, hash: prev } : null;
+  const want = expectedHead ?? exp.head ?? undefined;
+  if (want && (head?.seq !== want.seq || head.hash !== want.hash)) {
+    return { ok: false, seq: want.seq, reason: "log head does not match the expected head (entries removed or replaced)" };
+  }
+  return { ok: true, count, head };
 }

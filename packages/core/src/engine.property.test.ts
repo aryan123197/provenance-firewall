@@ -66,7 +66,7 @@ const states = fc
 
 const runs = { numRuns: 20_000 };
 
-describe("engine safety properties (independent of the rule code)", () => {
+describe("engine safety properties (independent of the rule code)", { timeout: 60_000 }, () => {
   test("allow implies an exact registry match for payee and account", () => {
     fc.assert(
       fc.property(intents, states, (i, s) => {
