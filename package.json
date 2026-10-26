@@ -17,20 +17,23 @@
     "harness": "tsx scripts/harness.ts",
     "start": "tsx packages/server/src/main.ts",
     "dev:demo": "DEMO_MODE=1 OPEN_OPERATOR=1 DATABASE_PATH=:memory: tsx packages/server/src/main.ts",
-    "build": "pnpm --filter @pfw/dashboard build"
+    "build": "pnpm --filter @pfw/dashboard build",
+    "gen:audit-key": "tsx scripts/gen-audit-key.ts"
   },
   "devDependencies": {
-    "@pfw/adapter": "workspace:*",
-    "@pfw/core": "workspace:*",
-    "@pfw/firewall": "workspace:*",
-    "@pfw/harness": "workspace:*",
-    "@pfw/store": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.5",
     "fast-check": "^4.10.2",
-    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5",
-    "@pfw/server": "workspace:*"
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "tsx": "^4.23.15",
+    "@pfw/server": "workspace:*",
+    "@pfw/harness": "workspace:*",
+    "@pfw/core": "workspace:*",
+    "@pfw/store": "workspace:*",
+    "@pfw/adapter": "workspace:*",
+    "@pfw/firewall": "workspace:*"
   }
 }

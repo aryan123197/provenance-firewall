@@ -7,7 +7,7 @@ settings:
 importers:
 
   .:
-    devDependencies:
+    dependencies:
       '@pfw/adapter':
         specifier: workspace:*
         version: link:packages/adapter
@@ -26,6 +26,10 @@ importers:
       '@pfw/store':
         specifier: workspace:*
         version: link:packages/store
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+    devDependencies:
       '@types/better-sqlite3':
         specifier: ^9.6.0
         version: 9.6.0
@@ -35,9 +39,6 @@ importers:
       fast-check:
         specifier: ^4.10.2
         version: 4.10.2
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

@@ -1,0 +1,28 @@
+# Render blueprint for the public demo. Payments stay simulated unless PayPal sandbox credentials are added in the dashboard.
+services:
+  - type: web
+    name: provenance-firewall
+    runtime: node
+    plan: free
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm start
+    healthCheckPath: /api/status
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DEMO_MODE            # seeds the demo vendor registry and mounts the scenario runner
+        value: "1"
+      - key: OPEN_OPERATOR        # anyone can use the approve/reject buttons; only safe because money is simulated or sandbox
+        value: "1"
+      - key: DATABASE_PATH
+        value: /tmp/pfw.db
+      - key: AUTHORITY_KEY
+        generateValue: true
+      - key: AUDIT_SIGNING_KEY    # base64 PKCS8 Ed25519 key; leave unset for an ephemeral key (see README)
+        sync: false
+      - key: PAYPAL_CLIENT_ID     # optional: PayPal sandbox credentials switch the server from simulated to sandbox
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
