@@ -46,6 +46,19 @@ CREATE TABLE IF NOT EXISTS executions (
   payload_json    TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );
+-- Pending and resolved human approvals. One per idempotency key, bound to that exact intent.
+CREATE TABLE IF NOT EXISTS approvals (
+  id              TEXT PRIMARY KEY,
+  idempotency_key TEXT NOT NULL UNIQUE REFERENCES decisions(idempotency_key),
+  request_hash    TEXT NOT NULL,
+  intent_json     TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  requested_at    TEXT NOT NULL,
+  resolved_by     TEXT,
+  resolved_at     TEXT,
+  note            TEXT
+);
+
 -- Hash-chained, signed history of everything that happened. Rows are never changed or removed.
 CREATE TABLE IF NOT EXISTS audit_keys (
   key_id     TEXT PRIMARY KEY,

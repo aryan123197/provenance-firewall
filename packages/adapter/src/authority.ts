@@ -13,6 +13,13 @@ export interface AllowedIntent {
   readonly tag: string;
 }
 
+/** A person's approval of one specific intent, issued by the store when an operator approves. */
+export interface ApprovalGrant {
+  approvalId: string;
+  idempotencyKey: string;
+  approver: string;
+}
+
 export class UnauthorizedPaymentError extends Error {
   constructor(message: string) {
     super(message);
@@ -47,6 +54,26 @@ export class Authority {
   /** Called by the firewall only. Refuses anything but an allow decision for this very intent. */
   mint(intent: ResolvedIntent, decision: Decision): AllowedIntent {
     if (decision.verdict !== "allow") throw new UnauthorizedPaymentError(`cannot authorize a "${decision.verdict}" decision`);
+    this.assertMatches(intent, decision);
+    return this.seal(intent, decision, "policy");
+  }
+
+  /**
+   * A person approved a "require_approval" decision. The grant is bound to this intent's idempotency key,
+   * and an approval can never turn a "deny" into a payment.
+   */
+  mintApproved(intent: ResolvedIntent, decision: Decision, grant: ApprovalGrant): AllowedIntent {
+    if (decision.verdict !== "require_approval") throw new UnauthorizedPaymentError(`cannot apply an approval to a "${decision.verdict}" decision`);
+    if (grant.idempotencyKey !== intent.idempotencyKey) throw new UnauthorizedPaymentError("approval was granted for a different payment");
+    this.assertMatches(intent, decision);
+    return this.seal(intent, decision, `approval:${grant.approvalId}:${grant.approver}`);
+  }
+
+  private seal(intent: ResolvedIntent, decision: Decision, authorizedBy: string): AllowedIntent {
+    return { intent, decision, authorizedBy, tag: this.tagFor(intent, decision, authorizedBy) };
+  }
+
+  private assertMatches(intent: ResolvedIntent, decision: Decision): void {
     const f = decision.fields;
     if (
       f.payee.value !== intent.payee.value ||
@@ -56,15 +83,14 @@ export class Authority {
     ) {
       throw new UnauthorizedPaymentError("decision does not match the intent");
     }
-    const authorizedBy = "policy";
-    return { intent, decision, authorizedBy, tag: this.tagFor(intent, decision, authorizedBy) };
   }
 
   /** Called by adapters before any money moves. */
   verify(a: AllowedIntent): void {
     const expected = Buffer.from(this.tagFor(a.intent, a.decision, a.authorizedBy), "hex");
     const actual = Buffer.from(typeof a.tag === "string" ? a.tag : "", "hex");
-    if (actual.length !== expected.length || !timingSafeEqual(actual, expected) || a.decision.verdict !== "allow") {
+    const verdictOk = a.authorizedBy === "policy" ? a.decision.verdict === "allow" : a.authorizedBy.startsWith("approval:") && a.decision.verdict === "require_approval";
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected) || !verdictOk) {
       throw new UnauthorizedPaymentError("missing or invalid authorization for this payment");
     }
   }

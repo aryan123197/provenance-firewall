@@ -98,6 +98,30 @@ describe("Authority: no bypass path", () => {
   test("short keys are rejected", () => expect(() => new Authority("short")).toThrow());
 });
 
+describe("Authority: approvals", () => {
+  const big = () => intent({ amount: f("user", 60000) });
+  const grant = { approvalId: "apr_1", idempotencyKey: "key-1", approver: "dana" };
+  test("an approval authorizes a require_approval decision for the same payment", () => {
+    const a = authority.mintApproved(big(), decide(big()), grant);
+    expect(() => authority.verify(a)).not.toThrow();
+    expect(a.authorizedBy).toBe("approval:apr_1:dana");
+  });
+  test("an approval cannot authorize a deny, and cannot be applied to an allow", () => {
+    const evil = intent({ account: f("invoice", "evil@x.example"), payee: f("invoice", "Evil") });
+    expect(() => authority.mintApproved(evil, decide(evil), grant)).toThrow(/"deny"/);
+    expect(() => authority.mintApproved(intent(), decide(intent()), grant)).toThrow(/"allow"/);
+  });
+  test("an approval for one payment cannot authorize another", () => {
+    expect(() => authority.mintApproved(big(), decide(big()), { ...grant, idempotencyKey: "other" })).toThrow(/different payment/);
+  });
+  test("relabelling an approval as policy, or the reverse, invalidates the tag", () => {
+    const a = authority.mintApproved(big(), decide(big()), grant);
+    expect(() => authority.verify({ ...a, authorizedBy: "policy" })).toThrow(UnauthorizedPaymentError);
+    const p = allowed();
+    expect(() => authority.verify({ ...p, authorizedBy: "approval:apr_1:dana" })).toThrow(UnauthorizedPaymentError);
+  });
+});
+
 describe("PayPalAdapter", () => {
   test("refuses non-sandbox hosts", () => {
     expect(() => new PayPalAdapter({ clientId: "a", clientSecret: "b", authority, baseUrl: "https://api-m.paypal.com" })).toThrow(/non-sandbox/);

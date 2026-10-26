@@ -33,6 +33,37 @@ export interface ExecutionRecord {
   payload: unknown;
 }
 
+export class ApprovalStateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApprovalStateError";
+  }
+}
+
+export interface Approval {
+  id: string;
+  idempotencyKey: string;
+  status: "pending" | "approved" | "rejected";
+  requestedAt: string;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  note: string | null;
+  intent: ResolvedIntent;
+  decision: Decision;
+}
+
+export interface ApprovalGrant {
+  approvalId: string;
+  idempotencyKey: string;
+  approver: string;
+}
+
+export type ResolveApprovalResult =
+  | { ok: true; status: "approved"; grant: ApprovalGrant }
+  | { ok: true; status: "rejected" }
+  /** Re-evaluation now denies the payment (a cap was used up, say). An approval cannot override a deny. */
+  | { ok: false; reason: string; decision: Decision };
+
 export interface StoreOptions {
   path?: string;
   clock?: () => Date;
@@ -52,6 +83,29 @@ function requestHash(i: ResolvedIntent): string {
   };
   return createHash("sha256").update(canonicalJson(body)).digest("hex");
 }
+
+interface ApprovalRow {
+  id: string;
+  idempotency_key: string;
+  status: Approval["status"];
+  requested_at: string;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  note: string | null;
+  intent_json: string;
+  decision_json: string;
+}
+const toApproval = (r: ApprovalRow): Approval => ({
+  id: r.id,
+  idempotencyKey: r.idempotency_key,
+  status: r.status,
+  requestedAt: r.requested_at,
+  resolvedBy: r.resolved_by,
+  resolvedAt: r.resolved_at,
+  note: r.note,
+  intent: JSON.parse(r.intent_json) as ResolvedIntent,
+  decision: JSON.parse(r.decision_json) as Decision,
+});
 
 interface VendorRow { id: string; name: string; account: string; category: string }
 interface PoRow { id: string; vendor_id: string; amount: number; currency: string }
@@ -123,6 +177,14 @@ export class Store {
 
       this.audit.append("decision", { idempotencyKey: intent.idempotencyKey, agentId: intent.agentId, decision });
 
+      if (decision.verdict === "require_approval") {
+        const id = `apr_${hash.slice(0, 16)}_${createHash("sha256").update(intent.idempotencyKey).digest("hex").slice(0, 8)}`;
+        this.db
+          .prepare("INSERT INTO approvals (id, idempotency_key, request_hash, intent_json, requested_at) VALUES (?, ?, ?, ?, ?)")
+          .run(id, intent.idempotencyKey, hash, JSON.stringify(intent), at);
+        this.audit.append("approval_requested", { approvalId: id, idempotencyKey: intent.idempotencyKey, agentId: intent.agentId, rule: decision.rule, reason: decision.reason });
+      }
+
       if (decision.verdict === "allow") {
         const vendor = this.matchVendor(intent);
         this.db
@@ -131,6 +193,84 @@ export class Store {
       }
       return { decision, replayed: false };
     }).immediate();
+  }
+
+  getApproval(id: string): Approval | null {
+    return this.approvalWhere("a.id = ?", id);
+  }
+
+  getApprovalByKey(key: string): Approval | null {
+    return this.approvalWhere("a.idempotency_key = ?", key);
+  }
+
+  listApprovals(status?: Approval["status"]): Approval[] {
+    const rows = this.db
+      .prepare(
+        `SELECT a.*, d.decision_json FROM approvals a JOIN decisions d ON d.idempotency_key = a.idempotency_key
+         ${status ? "WHERE a.status = ?" : ""} ORDER BY a.requested_at, a.id`,
+      )
+      .all(...(status ? [status] : [])) as ApprovalRow[];
+    return rows.map(toApproval);
+  }
+
+  /**
+   * Approve or reject. Approving re-evaluates against current state: it clears "needs approval" findings, never a deny.
+   * Approved spend is recorded here, so it counts toward caps from this moment.
+   */
+  resolveApproval(id: string, input: { approver: string; approve: boolean; note?: string }, policy: Policy): ResolveApprovalResult {
+    return this.db.transaction((): ResolveApprovalResult => {
+      const a = this.getApproval(id);
+      if (!a) throw new ApprovalStateError(`unknown approval ${id}`);
+      if (a.status !== "pending") throw new ApprovalStateError(`approval ${id} is already ${a.status}`);
+      if (!input.approver.trim()) throw new ApprovalStateError("an approver is required");
+      if (input.approver === a.intent.agentId) throw new ApprovalStateError("an agent cannot approve its own payment");
+
+      const now = this.clock();
+      const at = now.toISOString();
+
+      if (input.approve) {
+        const fresh = evaluate(a.intent, policy, this.stateFor(a.intent, now));
+        if (fresh.verdict === "deny") {
+          this.audit.append("approval_blocked", { approvalId: id, approver: input.approver, rule: fresh.rule, reason: fresh.reason });
+          return { ok: false, reason: fresh.reason, decision: fresh };
+        }
+      }
+
+      this.db
+        .prepare("UPDATE approvals SET status = ?, resolved_by = ?, resolved_at = ?, note = ? WHERE id = ? AND status = 'pending'")
+        .run(input.approve ? "approved" : "rejected", input.approver, at, input.note ?? null, id);
+
+      if (!input.approve) {
+        this.audit.append("approval_rejected", { approvalId: id, idempotencyKey: a.idempotencyKey, approver: input.approver, note: input.note ?? null });
+        return { ok: true, status: "rejected" };
+      }
+      const vendor = this.matchVendor(a.intent);
+      this.db
+        .prepare("INSERT INTO payments (idempotency_key, agent_id, vendor_id, amount, currency, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(a.idempotencyKey, a.intent.agentId, vendor?.id ?? null, a.intent.amount.value, a.intent.currency.value, at);
+      this.audit.append("approval_granted", {
+        approvalId: id,
+        idempotencyKey: a.idempotencyKey,
+        approver: input.approver,
+        note: input.note ?? null,
+        amount: a.intent.amount.value,
+        currency: a.intent.currency.value,
+      });
+      return { ok: true, status: "approved", grant: { approvalId: id, idempotencyKey: a.idempotencyKey, approver: input.approver } };
+    }).immediate();
+  }
+
+  /** The grant for an approved payment, used to authorize (or resume) its execution. */
+  getGrant(key: string): ApprovalGrant | null {
+    const a = this.getApprovalByKey(key);
+    return a?.status === "approved" && a.resolvedBy ? { approvalId: a.id, idempotencyKey: key, approver: a.resolvedBy } : null;
+  }
+
+  private approvalWhere(where: string, arg: string): Approval | null {
+    const r = this.db
+      .prepare(`SELECT a.*, d.decision_json FROM approvals a JOIN decisions d ON d.idempotency_key = a.idempotency_key WHERE ${where}`)
+      .get(arg) as ApprovalRow | undefined;
+    return r ? toApproval(r) : null;
   }
 
   getExecution(key: string): ExecutionRecord | null {
