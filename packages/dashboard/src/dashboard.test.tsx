@@ -348,3 +348,44 @@ describe("approval inbox", () => {
     await screen.findByText("Nothing waiting for you");
   });
 });
+
+describe("text from invoices and emails is shown as text, never as markup", () => {
+  // Payee, account and notes originate in third-party documents. The dashboard must show them literally.
+  const hostile = ['<img src=x onerror="window.__pwned=1">', "<script>window.__pwned=1</script>", '"><svg onload="window.__pwned=1">', "javascript:window.__pwned=1", "‮evil‬", "A".repeat(3000)];
+  const trusted = (value: unknown, kind = "invoice") => ({ value, trust: 3, origins: [{ kind, ref: `${kind}:x#y` }] });
+
+  const approvalFor = (payee: string) => {
+    const fields = { payee: trusted(payee), account: trusted(payee), amount: trusted(80_000), currency: { value: "USD", trust: 0, origins: [{ kind: "user", ref: "user:req#currency" }] }, category: trusted("software", "vendor") };
+    return {
+      id: "apr_h",
+      idempotencyKey: "kh",
+      status: "pending",
+      requestedAt: "2026-10-26T12:00:00.000Z",
+      resolvedBy: null,
+      resolvedAt: null,
+      note: null,
+      intent: { agentId: payee, idempotencyKey: "kh", ...fields },
+      decision: { verdict: "require_approval", rule: "approval_threshold", reason: `${payee} is above the threshold.`, alert: false, findings: [], policy: { name: "default", version: 1, hash: "h" }, fields, evaluatedAt: "2026-10-26T12:00:00.000Z" },
+    } as unknown as Approval;
+  };
+
+  test.each(hostile.map((h, i) => [i, h] as const))("approval card, payload %i", async (_i, payload) => {
+    mockApi({ "GET /api/approvals": { body: { approvals: [approvalFor(payload)] } } });
+    const { container } = render(<Approvals open={() => {}} onChange={() => {}} />);
+    await screen.findByRole("button", { name: /Approve and pay/ });
+    // Nothing the payload contained became an element or an event handler.
+    expect(container.querySelector("img, script, svg[onload], [onerror], [onload]")).toBeNull();
+    expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+    // The text itself is on the page, as text.
+    expect(container.textContent).toContain(payload.slice(0, 40));
+  });
+
+  test.each(hostile.map((h, i) => [i, h] as const))("registry, vendor named by payload %i", async (_i, payload) => {
+    mockApi({ "GET /api/registry": { body: { vendors: [{ id: "bad", name: payload, account: "a@x.example", category: "software" }], purchaseOrders: [] } } });
+    const { container } = render(<RegistryScreen />);
+    await screen.findByRole("button", { name: "Edit" });
+    expect(container.querySelector("img, script, svg[onload], [onerror], [onload]")).toBeNull();
+    expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+    expect(container.textContent).toContain(payload.slice(0, 40));
+  });
+});

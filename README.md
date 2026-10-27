@@ -132,7 +132,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | `packages/server` | HTTP API, webhook endpoint, demo runner |
 | `packages/dashboard` | React + AG Grid operator dashboard, including the vendor registry and purchase order screen |
 | `packages/llm` | Claude-backed procurement agent and plain-English policy compiler |
-| `packages/harness` | 24 attack and legitimate scenarios, baseline vs firewalled runner, scorecard |
+| `packages/harness` | 26 attack and legitimate scenarios, baseline vs firewalled runner, scorecard |
 | `policies/` | Versioned policy files |
 | `reports/` | Committed scorecard (a test fails if it is stale) |
 | `SPEC.md` | Original project spec |
