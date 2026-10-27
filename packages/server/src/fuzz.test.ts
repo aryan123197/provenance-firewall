@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vitest";
 import { buildServer } from "./server";
@@ -32,11 +33,33 @@ const postRoutes = [
   "/api/demo/run",
   "/api/demo/simulate-drift",
   "/api/webhooks/paypal",
-  "/api/slack/events",
 ];
 const getRoutes = ["/api/status", "/api/decisions", "/api/approvals", "/api/audit", "/api/registry", "/api/drift", "/api/policy", "/api/scorecard"];
 
 const fail = (status: number, method: string, url: string, detail: unknown) => `${method} ${url} returned ${status} for ${JSON.stringify(detail)?.slice(0, 300)}`;
+
+const SLACK_SECRET = "fuzz-slack-secret";
+const slackPosts: unknown[] = [];
+const slackServer = buildServer({
+  databasePath: ":memory:",
+  policyPath: new URL("../../../policies/default.policy.yaml", import.meta.url).pathname,
+  staticDir: "/nonexistent",
+  scorecardPath: "/nonexistent.json",
+  port: 0,
+  host: "127.0.0.1",
+  authorityKey: "test-authority-key-0123456789",
+  openOperator: true,
+  llmDailyCalls: 300,
+  rateLimitPerMinute: 0,
+  trustProxy: false,
+  demo: true,
+  llm: null,
+  slack: { signingSecret: SLACK_SECRET, botToken: "xoxb-fuzz", allowedUsers: [] },
+  slackFetch: (async (_u: string, init: { body: string }) => {
+    slackPosts.push(init.body);
+    return new Response("{}");
+  }) as unknown as typeof fetch,
+});
 
 describe("API fuzzing", () => {
   test("no POST route answers 5xx, whatever the body", async () => {
@@ -67,7 +90,42 @@ describe("API fuzzing", () => {
     );
   }, 120_000);
 
+  test("correctly signed Slack payloads of any shape never produce a 5xx or an unhandled rejection", async () => {
+    const rejections: unknown[] = [];
+    const onRejection = (e: unknown) => rejections.push(e);
+    process.on("unhandledRejection", onRejection);
+    const event = fc.record(
+      { type: fc.constantFrom("app_mention", "message", "reaction_added", weirdString), user: weirdValue, text: weirdValue, channel: weirdValue, channel_type: fc.constantFrom("im", "channel", weirdString), ts: weirdValue, thread_ts: weirdValue, bot_id: fc.constant(undefined), subtype: fc.constant(undefined) },
+      { requiredKeys: [] },
+    );
+    const envelope = fc.oneof(
+      fc.record({ type: fc.constantFrom("event_callback", "url_verification", weirdString), event_id: weirdValue, challenge: weirdValue, event }, { requiredKeys: [] }),
+      weirdValue,
+    );
+    try {
+      await fc.assert(
+        fc.asyncProperty(envelope, async (payload) => {
+          const raw = JSON.stringify(payload ?? null);
+          const ts = Math.floor(Date.now() / 1000);
+          const res = await slackServer.app.inject({
+            method: "POST",
+            url: "/api/slack/events",
+            payload: raw,
+            headers: { "content-type": "application/json", "x-slack-request-timestamp": String(ts), "x-slack-signature": `v0=${createHmac("sha256", SLACK_SECRET).update(`v0:${ts}:${raw}`).digest("hex")}` },
+          });
+          expect(res.statusCode, fail(res.statusCode, "POST", "/api/slack/events", payload)).toBeLessThan(500);
+        }),
+        { numRuns: 600 },
+      );
+      await new Promise((r) => setTimeout(r, 200));
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
+  }, 120_000);
+
   test("after all of that the audit log still verifies", async () => {
     expect((await server.app.inject({ url: "/api/audit/verify" })).json()).toMatchObject({ ok: true });
+    expect((await slackServer.app.inject({ url: "/api/audit/verify" })).json()).toMatchObject({ ok: true });
   });
 });
