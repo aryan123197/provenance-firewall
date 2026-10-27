@@ -160,3 +160,99 @@ describe("a firewalled agent that proposes anything", () => {
     expect(seen.held).toBeGreaterThan(0);
   }, 180_000);
 });
+
+describe("provider webhooks arriving in any order", () => {
+  const RANK: Record<string, number> = { unknown: 0, pending: 0, unclaimed: 1, success: 2, failed: 2, returned: 3 };
+  const STATUSES = Object.keys(RANK);
+
+  /** One event for payment `pay` (an index into the executed payments), or for a payment we never made when `pay` is -1. */
+  const event = fc.record({
+    pay: fc.integer({ min: -1, max: 5 }),
+    id: fc.integer({ min: 0, max: 30 }),
+    status: fc.constantFrom(...STATUSES),
+    tamper: fc.constantFrom("none", "none", "none", "amount", "currency", "receiver"),
+  });
+
+  const covered = { matched: 0, tampered: 0, unmatched: 0, duplicate: 0 };
+  test("statuses only move forward, duplicates change nothing, and tampered or unknown payments open drift without moving money", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.array(proposal, { minLength: 1, maxLength: 12 }), fc.array(event, { minLength: 1, maxLength: 30 }), async (proposals, events) => {
+        const { store, fake, fw, ctx } = world();
+        try {
+          const paid: { key: string; reference: string; amount: number; currency: string; receiver: string }[] = [];
+          for (const p of proposals) {
+            try {
+              const o = await fw.submit(p as never, ctx);
+              if (o.status === "executed") paid.push({ key: p.idempotencyKey, reference: o.receipt.reference, amount: o.receipt.amount, currency: o.receipt.currency, receiver: o.receipt.receiver });
+            } catch (e) {
+              expect(e instanceof IdempotencyConflictError, `unexpected error: ${String(e)}`).toBe(true);
+            }
+          }
+          const unique = [...new Map(paid.map((x) => [x.key, x])).values()];
+          const payoutsBefore = fake.payouts.length;
+          const delivered = new Map<string, number[]>(); // key -> ranks of events that matched it
+          const seenIds = new Set<string>();
+          const expectDrift = new Set<string>();
+
+          for (const e of events) {
+            const target = e.pay >= 0 ? unique[e.pay % Math.max(unique.length, 1)] : undefined;
+            const id = `evt-${e.id}`;
+            const ev = target
+              ? {
+                  id,
+                  type: "PAYMENT.PAYOUTS-ITEM.SUCCEEDED",
+                  reference: target.reference,
+                  status: e.status,
+                  amount: e.tamper === "amount" ? target.amount + 1 : target.amount,
+                  currency: e.tamper === "currency" ? "EUR" : target.currency,
+                  receiver: e.tamper === "receiver" ? ATTACKER : target.receiver,
+                }
+              : { id, type: "PAYMENT.PAYOUTS-ITEM.SUCCEEDED", reference: `UNKNOWN${e.id}`, status: e.status, amount: 100, currency: "USD", receiver: ATTACKER };
+            const res = store.recordProviderEvent(ev);
+            if (seenIds.has(id)) {
+              expect(res).toEqual({ result: "duplicate" }); // a replayed event id changes nothing
+              covered.duplicate++;
+              continue;
+            }
+            seenIds.add(id);
+            if (!target) {
+              expect(res).toMatchObject({ result: "drift", kind: "unmatched_payment" });
+              expectDrift.add(`unmatched_payment:${ev.reference}`);
+              covered.unmatched++;
+              continue;
+            }
+            delivered.set(target.key, [...(delivered.get(target.key) ?? []), RANK[e.status]!]);
+            if (e.tamper !== "none") {
+              expect(res).toMatchObject({ result: "drift", kind: "detail_mismatch" });
+              expectDrift.add(`detail_mismatch:${target.reference}`);
+              covered.tampered++;
+            } else {
+              expect(res).toMatchObject({ result: "matched" });
+              covered.matched++;
+            }
+          }
+
+          // Statuses only moved forward: the final rank is the highest rank delivered.
+          for (const [key, ranks] of delivered) {
+            const final = store.getExecution(key)?.providerStatus;
+            expect(RANK[final ?? "unknown"], `final status for ${key}`).toBe(Math.max(...ranks));
+          }
+          // Every tampered or unknown event is visible as drift, and clean traffic is not.
+          const drift = new Set(store.listDrift().map((d) => `${d.kind}:${d.reference}`));
+          expect(drift).toEqual(expectDrift);
+          // Webhooks report on money; they never move it.
+          expect(fake.payouts).toHaveLength(payoutsBefore);
+          expect(store.audit.verify()).toMatchObject({ ok: true });
+        } finally {
+          store.close();
+        }
+      }),
+      { numRuns: Number(process.env.FUZZ_RUNS ?? 300) },
+    );
+    // Only meaningful if the run really exercised matched, tampered, unmatched and replayed events.
+    expect(covered.matched).toBeGreaterThan(0);
+    expect(covered.tampered).toBeGreaterThan(0);
+    expect(covered.unmatched).toBeGreaterThan(0);
+    expect(covered.duplicate).toBeGreaterThan(0);
+  }, 180_000);
+});
