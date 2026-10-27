@@ -24,6 +24,16 @@ interface PayoutBody {
 
 const stable = (key: string) => `pfw-${createHash("sha256").update(key).digest("hex").slice(0, 32)}`;
 
+/**
+ * A 2xx from PayPal with no body, a non-object body or the wrong shape is a provider fault, not a programming error: it must reach the
+ * caller as a typed, retryable AdapterError. For a payout request the earlier attempt may have succeeded, and a retry with the same
+ * PayPal-Request-Id is safe.
+ */
+function body(res: unknown, what: string): Record<string, any> {
+  if (res !== null && typeof res === "object" && !Array.isArray(res)) return res as Record<string, any>;
+  throw new AdapterError(`PayPal returned an unexpected ${what} response`, true);
+}
+
 export function mapPayPalStatus(s: string | undefined): PaymentStatus {
   switch (s) {
     case "SUCCESS":
@@ -81,7 +91,7 @@ export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
     const proposal = this.propose(allowed);
     let res: { batch_header?: { payout_batch_id?: string; batch_status?: string } };
     try {
-      res = (await this.http.request("POST", "/v1/payments/payouts", proposal.request, { "PayPal-Request-Id": proposal.requestId })) as typeof res;
+      res = body(await this.http.request("POST", "/v1/payments/payouts", proposal.request, { "PayPal-Request-Id": proposal.requestId }), "payout") as typeof res;
     } catch (e) {
       // A retry after a lost response must not be recorded as a failure when the payout actually went through.
       const original = await this.originalPayout(e, proposal.requestId);
@@ -89,7 +99,7 @@ export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
       res = { batch_header: { payout_batch_id: original.id, ...(original.status ? { batch_status: original.status } : {}) } };
     }
     const reference = res.batch_header?.payout_batch_id;
-    if (!reference) throw new AdapterError("PayPal response had no payout_batch_id", false);
+    if (typeof reference !== "string" || !reference) throw new AdapterError("PayPal response had no payout_batch_id", false);
     const { intent } = allowed;
     return {
       provider: "paypal",
@@ -121,11 +131,12 @@ export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
   }
 
   async status(reference: string): Promise<PaymentStatus> {
-    const res = (await this.http.request("GET", `/v1/payments/payouts/${encodeURIComponent(reference)}`)) as {
+    const res = body(await this.http.request("GET", `/v1/payments/payouts/${encodeURIComponent(reference)}`), "payout status") as {
       batch_header?: { batch_status?: string };
       items?: { transaction_status?: string }[];
     };
-    return mapPayPalStatus(res.items?.[0]?.transaction_status ?? res.batch_header?.batch_status);
+    const s = res.items?.[0]?.transaction_status ?? res.batch_header?.batch_status;
+    return mapPayPalStatus(typeof s === "string" ? s : undefined);
   }
 
   /** Asks PayPal to verify the webhook signature, so a forged notification cannot move our records. */
@@ -140,7 +151,7 @@ export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
     } catch {
       return false;
     }
-    const res = (await this.http.request("POST", "/v1/notifications/verify-webhook-signature", {
+    const res = body(await this.http.request("POST", "/v1/notifications/verify-webhook-signature", {
       auth_algo: h("paypal-auth-algo"),
       cert_url: h("paypal-cert-url"),
       transmission_id: h("paypal-transmission-id"),
@@ -148,7 +159,7 @@ export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
       transmission_time: h("paypal-transmission-time"),
       webhook_id: this.cfg.webhookId,
       webhook_event: event,
-    })) as { verification_status?: string };
+    }), "webhook verification") as { verification_status?: string };
     return res.verification_status === "SUCCESS";
   }
 }

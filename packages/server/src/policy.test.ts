@@ -78,6 +78,10 @@ describe("compile", () => {
   });
   test("empty text is a 400, a garbage compile is a 422 and a failing compiler a 502", async () => {
     expect((await compile("   ")).status).toBe(400);
+    const before = calls.length;
+    expect((await compile("a".repeat(4001))).status).toBe(400); // rejected before any model call
+    expect(calls).toHaveLength(before);
+    expect((await compile("a".repeat(4000))).status).toBe(200);
     output = { ...SPEC_OUTPUT, patch: { newPayeeDenyDays: [9] } };
     expect((await compile()).status).toBe(422);
     const broken = build({ compiler: { compile: async () => { throw new Error("upstream down"); } } });

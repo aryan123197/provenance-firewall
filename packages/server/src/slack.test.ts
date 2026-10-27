@@ -165,6 +165,30 @@ describe("Slack events", () => {
   });
 });
 
+describe("Slack with PayPal credentials", () => {
+  const cfg = (allowedUsers: string[]) => ({
+    databasePath: ":memory:",
+    policyPath: new URL("../../../policies/default.policy.yaml", import.meta.url).pathname,
+    staticDir: "/nonexistent",
+    scorecardPath: "/nonexistent.json",
+    port: 0,
+    host: "127.0.0.1",
+    authorityKey: "test-authority-key-0123456789",
+    openOperator: true,
+    llmDailyCalls: 300,
+    rateLimitPerMinute: 0,
+    trustProxy: false,
+    demo: true,
+    llm: null,
+    paypal: { clientId: "id", clientSecret: "secret" },
+    slack: { signingSecret: SECRET, botToken: "xoxb-test", allowedUsers },
+  });
+  test("refuses to start without an allow-list, since a run would send sandbox payouts", () => {
+    expect(() => buildServer(cfg([]))).toThrow(/SLACK_ALLOWED_USERS is required/);
+    void buildServer(cfg(["U1"])).close();
+  });
+});
+
 describe("configFromEnv", () => {
   test("Slack needs both the signing secret and the bot token", () => {
     expect(configFromEnv({ SLACK_SIGNING_SECRET: "s" }).slack).toBeUndefined();

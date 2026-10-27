@@ -67,6 +67,21 @@ describe("read endpoints", () => {
     expect((await app.inject({ url: "/api/audit/verify" })).json()).toMatchObject({ ok: true });
     expect((await app.inject({ url: "/api/drift" })).json()).toEqual({ drift: [] });
   });
+  test("paging parameters are clamped, so odd values never error or lift the page cap", async () => {
+    for (let i = 1; i <= 3; i++) await firewall.submit(propose({ idempotencyKey: `p${i}` }), ctx);
+    const count = async (qs: string) => ((await app.inject({ url: `/api/decisions${qs}` })).json() as { decisions: unknown[] }).decisions.length;
+    expect(await count("?offset=1e999")).toBe(3); // not finite: treated as absent
+    expect(await count("?offset=99999999")).toBe(0);
+    expect(await count("?offset=-4")).toBe(3);
+    expect(await count("?offset=abc")).toBe(3);
+    expect(await count("?limit=-5")).toBe(1);
+    expect(await count("?limit=0")).toBe(1);
+    expect(await count("?limit=2")).toBe(2);
+    expect(await count("?limit=1e999")).toBe(3);
+    const audit = async (qs: string) => (await app.inject({ url: `/api/audit${qs}` }));
+    expect((await audit("?after=1e999")).statusCode).toBe(200);
+    expect(((await audit("?limit=-1")).json() as { entries: unknown[] }).entries).toHaveLength(1);
+  });
   test("unknown API paths 404 as JSON", async () => {
     expect((await app.inject({ url: "/api/nothing" })).statusCode).toBe(404);
   });
