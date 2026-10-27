@@ -111,6 +111,8 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | `RATE_LIMIT_PER_MIN` | `240` | Requests per minute per client IP; `0` turns it off. Set `TRUST_PROXY=1` behind a proxy such as Render so real client addresses are used. |
 | `LLM_DAILY_CALLS` | `300` | Hard cap on Claude API calls per UTC day, across the policy compiler and the live agent. Calls past it return 429. Held in memory, so a restart resets it. |
 | `OPEN_OPERATOR` | off | `1` lets anyone approve or reject. Public demos on simulated or sandbox money only. |
+| `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN` | off | Both set (with `DEMO_MODE=1`) turns on the Slack input: Events API requests to `/api/slack/events` are checked against Slack's signature, and a mention or direct message of `<scenario-id> [request]` runs that demo scenario and replies in the thread. Slack text never supplies a payee, account or amount, and approvals stay in the dashboard. |
+| `SLACK_ALLOWED_USERS` | anyone | Comma-separated Slack user ids allowed to run scenarios. |
 | `DEMO_MODE` | off | `1` seeds demo vendors and mounts the scenario runner |
 | `AUTHORITY_KEY` | random per process | Shared secret between firewall and adapter |
 | `AUDIT_SIGNING_KEY` | ephemeral | Base64 PKCS8 Ed25519 key (`pnpm gen:audit-key`). Without it, entries after a restart are signed with a new key. |

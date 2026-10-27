@@ -12,6 +12,7 @@ import { VENDORS, type Agent } from "@pfw/harness";
 import { AnthropicPolicyCompiler, LlmAgent, createClient, withDailyBudget, type MessagesClient, type PolicyCompiler } from "@pfw/llm";
 import { createApp, type Runtime } from "./app";
 import { registerDemo } from "./demo";
+import { registerSlack, type SlackConfig } from "./slack";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -39,7 +40,10 @@ export interface ServerConfig {
   llmDailyCalls: number;
   /** A live Claude client for the demo agent and the policy compiler. Defaults to one built from the environment, if any. */
   llm?: MessagesClient | null;
+  /** Slack Events API input. Needs demo mode, because it runs the demo scenarios. */
+  slack?: SlackConfig;
   /** Test seams. */
+  slackFetch?: typeof fetch;
   compiler?: PolicyCompiler;
   llmAgent?: Agent;
 }
@@ -66,6 +70,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
     trustProxy: env.TRUST_PROXY === "1",
     openOperator: env.OPEN_OPERATOR === "1",
     demo,
+    ...(env.SLACK_SIGNING_SECRET && env.SLACK_BOT_TOKEN
+      ? { slack: { signingSecret: env.SLACK_SIGNING_SECRET, botToken: env.SLACK_BOT_TOKEN, allowedUsers: (env.SLACK_ALLOWED_USERS ?? "").split(",").map((u) => u.trim()).filter(Boolean) } }
+      : {}),
     ...(env.REGISTRY_PATH ? { registryPath: env.REGISTRY_PATH } : {}),
   };
 }
@@ -144,7 +151,7 @@ export function buildServer(cfg: ServerConfig): Server {
     staticDir: cfg.staticDir,
     extend: (a, guard) => {
       if (!cfg.demo) return;
-      registerDemo(a, {
+      const runner = registerDemo(a, {
         runtime: () => runtime,
         ...(llmAgent ? { llmAgent } : {}),
         reset: () => {
@@ -153,6 +160,7 @@ export function buildServer(cfg: ServerConfig): Server {
           runtime = createRuntime();
         },
       }, guard);
+      if (cfg.slack) registerSlack(a, { config: cfg.slack, runner, ...(llmAgent ? { llmAgent } : {}), ...(cfg.slackFetch ? { fetch: cfg.slackFetch } : {}) });
     },
   });
 
