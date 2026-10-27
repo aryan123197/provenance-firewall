@@ -45,7 +45,12 @@ export class PayPalHttp {
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
       const text = await res.text();
-      return text ? (JSON.parse(text) as unknown) : undefined;
+      try {
+        return text ? (JSON.parse(text) as unknown) : undefined;
+      } catch {
+        // The request got a 2xx, so it may well have been carried out; the caller can retry with the same request id.
+        throw new AdapterError("PayPal returned a success status with a body that is not JSON", true);
+      }
     } catch (e) {
       if (e instanceof AdapterError && e.httpStatus === 401 && retryAuth) {
         this.token = null;
@@ -63,9 +68,15 @@ export class PayPalHttp {
       headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded" },
       body: "grant_type=client_credentials",
     });
-    const json = (await res.json()) as { access_token?: string; expires_in?: number };
-    if (!json.access_token) throw new AdapterError("PayPal token response had no access_token", false);
-    this.token = { value: json.access_token, expiresAt: this.now() + (json.expires_in ?? 300) * 1000 };
+    let json: { access_token?: unknown; expires_in?: unknown } | null;
+    try {
+      json = (await res.json()) as typeof json;
+    } catch {
+      throw new AdapterError("PayPal token response was not JSON", true);
+    }
+    if (!json || typeof json.access_token !== "string" || !json.access_token) throw new AdapterError("PayPal token response had no access_token", false);
+    const ttl = typeof json.expires_in === "number" && Number.isFinite(json.expires_in) && json.expires_in > 0 ? json.expires_in : 300;
+    this.token = { value: json.access_token, expiresAt: this.now() + ttl * 1000 };
     return this.token.value;
   }
 
