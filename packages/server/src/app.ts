@@ -231,6 +231,8 @@ export function createApp(deps: AppDeps): FastifyInstance {
     if (!deps.compiler) return reply.code(503).send({ error: "Plain-English policies need a Claude API key (ANTHROPIC_API_KEY) on the server." });
     const english = req.body?.english;
     if (typeof english !== "string" || !english.trim()) return reply.code(400).send({ error: "Write the policy you want first." });
+    // The same limit the store enforces on activation, checked before a paid model call rather than after it.
+    if (english.length > 4000) return reply.code(400).send({ error: "That policy text is too long (4,000 characters at most)." });
     const active = deps.runtime().policy();
     try {
       const out = await deps.compiler.compile(english, active);
