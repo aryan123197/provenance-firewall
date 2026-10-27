@@ -41,7 +41,8 @@ const status = fc.constantFrom(200, 201, 202, 204, 400, 401, 403, 404, 409, 422,
 
 /** A fetch that answers every request with one canned response, as raw text so non-JSON bodies are covered too. */
 const respond = (code: number, body: unknown, raw: boolean) => {
-  const text = raw ? String(body) : JSON.stringify(body ?? null);
+  // `raw` sends the value as plain text. Objects with hostile members (a `toString` that is an array) must not break the test's own stub.
+  const text = raw ? (typeof body === "string" ? body : (JSON.stringify(body) ?? "")) : (JSON.stringify(body ?? null) ?? "null");
   return (async () => new Response(code === 204 ? null : text, { status: code, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
 };
 
@@ -125,7 +126,8 @@ describe("adapter against a broken token endpoint", () => {
           expect(isTyped(e), `untyped error: ${String(e)}`).toBe(true);
         }
       }),
-      { numRuns: 300 },
+      // The first example is the input that once broke this test's own stub in CI (an object whose toString is an array).
+      { numRuns: 300, examples: [[200, { toString: [] }, true]] },
     );
   });
 });

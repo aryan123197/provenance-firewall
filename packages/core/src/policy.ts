@@ -32,15 +32,19 @@ export interface Policy extends PolicyDoc {
 }
 
 export function canonicalJson(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
+  // Follows JSON.stringify for values it cannot represent: an object property is omitted, an array element becomes null. Without this
+  // an `undefined` field printed the text "undefined", which is not JSON and broke reading the audit log back.
+  const absent = (x: unknown) => x === undefined || typeof x === "function" || typeof x === "symbol";
+  if (Array.isArray(v)) return `[${v.map((x) => (absent(x) ? "null" : canonicalJson(x))).join(",")}]`;
   if (v && typeof v === "object") {
     const o = v as Record<string, unknown>;
     return `{${Object.keys(o)
+      .filter((k) => !absent(o[k]))
       .sort()
       .map((k) => `${JSON.stringify(k)}:${canonicalJson(o[k])}`)
       .join(",")}}`;
   }
-  return JSON.stringify(v);
+  return JSON.stringify(v) ?? "null";
 }
 
 export function hashPolicy(doc: PolicyDoc): string {
