@@ -53,6 +53,12 @@ export interface AppDeps {
   extend?: (app: FastifyInstance, guard: (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>) => void;
 }
 
+/** A query-string integer clamped to [min, max]; anything that is not a finite number falls back to `fallback`. */
+const intParam = (v: string | undefined, fallback: number, min: number, max: number): number => {
+  const n = Number(v);
+  return v === undefined || v === "" || !Number.isFinite(n) ? fallback : Math.min(Math.max(Math.trunc(n), min), max);
+};
+
 const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 export function createApp(deps: AppDeps): FastifyInstance {
@@ -115,8 +121,8 @@ export function createApp(deps: AppDeps): FastifyInstance {
 
   app.get<{ Querystring: { limit?: string; offset?: string } }>("/api/decisions", async (req) => ({
     decisions: deps.runtime().store.listDecisions({
-      limit: Math.min(Number(req.query.limit ?? 200) || 200, 500),
-      offset: Number(req.query.offset ?? 0) || 0,
+      limit: intParam(req.query.limit, 200, 1, 500),
+      offset: intParam(req.query.offset, 0, 0, Number.MAX_SAFE_INTEGER),
     }),
   }));
 
@@ -276,7 +282,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
   });
 
   app.get<{ Querystring: { after?: string; limit?: string } }>("/api/audit", async (req) => ({
-    entries: deps.runtime().store.audit.entries({ after: Number(req.query.after ?? 0) || 0, limit: Math.min(Number(req.query.limit ?? 200) || 200, 1000) }),
+    entries: deps.runtime().store.audit.entries({ after: intParam(req.query.after, 0, 0, Number.MAX_SAFE_INTEGER), limit: intParam(req.query.limit, 200, 1, 1000) }),
   }));
   // Everything needed to verify the log offline: `pnpm verify:audit <file>` checks it without trusting this server.
   app.get("/api/audit/export", async (_req, reply) => {
