@@ -62,6 +62,10 @@ The engine's safety claims are also checked as properties over tens of thousands
 - **LLM-authored policies** are a new way to make a mistake. The tests and diff catch inconsistency and unit slips, but not a reviewer who confirms without reading, and a policy that is internally consistent yet wrong for the business passes every test. The generated tests check that the compiled numbers behave as the engine should, not that they are what the operator should have wanted.
 - **The live Claude agent and compiler have not been run against the live API.** They are tested against a fake client that checks request shape and handling of refusals, truncation and malformed output.
 
+## Slack input
+
+The optional Slack input (`packages/server/src/slack.ts`) is another way to start a demo scenario, not another way to pay. Requests are accepted only with a valid Slack signature (HMAC over the exact body, five-minute window) and are de-duplicated by event id. A message can name a scenario id and, for the live Claude agent, a request sentence; it cannot supply a payee, account or amount, and it cannot approve a held payment, so a hijacked or malicious Slack workspace member can at most run the demo scenarios the dashboard already offers. Set `SLACK_ALLOWED_USERS` to restrict who can. It is not tested against a real Slack workspace; the tests sign requests themselves and stub the Slack API.
+
 ## Out of scope
 
 Compromise of the firewall host, its database file, `AUTHORITY_KEY` or `AUDIT_SIGNING_KEY`; compromise of the PayPal account or API credentials held by the firewall; denial of service; and attacks on PayPal itself.
