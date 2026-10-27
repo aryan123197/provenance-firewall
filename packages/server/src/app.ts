@@ -105,7 +105,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.get("/api/status", async () => {
     const { store, policy: activePolicy } = deps.runtime();
     const policy = activePolicy();
-    const audit = store.audit.verify();
+    const audit = store.audit.verifyIncremental();
     return {
       mode: deps.mode,
       demo: Boolean(deps.demo),

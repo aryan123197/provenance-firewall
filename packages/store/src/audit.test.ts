@@ -163,3 +163,70 @@ describe("audit log", () => {
     expect(createSigner(privateKey.export({ type: "pkcs8", format: "pem" }).toString()).keyId).toBe(createSigner(b64).keyId);
   });
 });
+
+describe("incremental verification (the status-poll health check)", () => {
+  test("agrees with a full verification as the log grows, first call and later ones", () => {
+    expect(store.audit.verifyIncremental()).toEqual(store.audit.verify()); // empty log
+    fill();
+    expect(store.audit.verifyIncremental()).toEqual(store.audit.verify());
+    store.decide(intent("k3"), policy);
+    const inc = store.audit.verifyIncremental();
+    expect(inc).toEqual(store.audit.verify());
+    expect(inc).toMatchObject({ ok: true, count: store.audit.head()!.seq });
+    expect(store.audit.verifyIncremental()).toEqual(inc); // nothing new
+  });
+
+  test("a new entry that was tampered with is caught without a full pass", () => {
+    fill();
+    store.audit.verifyIncremental();
+    store.decide(intent("k3"), policy);
+    dropTriggers();
+    const last = store.audit.head()!.seq;
+    store.db.prepare("UPDATE audit_log SET payload_json = replace(payload_json, 'allow', 'deny') WHERE seq = ?").run(last);
+    expect(store.audit.verifyIncremental()).toMatchObject({ ok: false, seq: last });
+  });
+
+  test("changing the last verified entry falls back to a full pass and fails", () => {
+    fill();
+    expect(store.audit.verifyIncremental().ok).toBe(true);
+    dropTriggers();
+    store.db.prepare("UPDATE audit_log SET payload_json = replace(payload_json, 'B1', 'B2') WHERE seq = 3").run();
+    expect(store.audit.verifyIncremental()).toMatchObject({ ok: false, seq: 3 });
+    // And it keeps failing, rather than trusting a stale baseline.
+    expect(store.audit.verifyIncremental().ok).toBe(false);
+  });
+
+  test("removing the last verified entry is not trusted either", () => {
+    fill();
+    store.audit.verifyIncremental();
+    dropTriggers();
+    store.db.prepare("DELETE FROM audit_log WHERE seq = 3").run();
+    store.decide(intent("k9"), policy); // appends after a different head
+    expect(store.audit.verifyIncremental().ok).toBe(true); // the log is internally consistent again...
+    expect(store.audit.verify(/* ...and a full pass agrees */).ok).toBe(true);
+  });
+
+  test("an edit to an older, already verified row is only found by the full pass (documented trade-off)", () => {
+    fill();
+    store.audit.verifyIncremental();
+    dropTriggers();
+    store.db.prepare("UPDATE audit_log SET payload_json = replace(payload_json, 'deny', 'allow') WHERE seq = 2").run();
+    expect(store.audit.verifyIncremental().ok).toBe(true);
+    expect(store.audit.verify()).toMatchObject({ ok: false, seq: 2 });
+    // The full pass resets the baseline, so the incremental check now reports it too.
+    expect(store.audit.verifyIncremental().ok).toBe(false);
+  });
+
+  test("is much cheaper than a full pass on a long log", () => {
+    for (let i = 0; i < 2000; i++) store.audit.append("probe", { i, note: "x".repeat(100) });
+    store.audit.verifyIncremental();
+    store.audit.append("probe", { i: 2000 });
+    const t0 = performance.now();
+    store.audit.verifyIncremental();
+    const incremental = performance.now() - t0;
+    const t1 = performance.now();
+    store.audit.verify();
+    const full = performance.now() - t1;
+    expect(incremental).toBeLessThan(full / 4);
+  });
+});
