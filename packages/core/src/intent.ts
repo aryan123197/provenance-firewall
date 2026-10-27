@@ -32,7 +32,8 @@ export type ProposedIntent = z.infer<typeof ProposedIntentSchema>;
 const FIELD_VALUES = {
   payee: text(200),
   account: text(254),
-  amount: z.number().int().nonnegative().safe(),
+  // At least one cent: a zero-amount payout is never what anyone meant, and approving one would only waste the approver's time.
+  amount: z.number().int().positive("an amount must be at least one cent").safe(),
   currency: z.string().regex(/^[A-Z]{3}$/),
   category: text(64),
 } as const;
