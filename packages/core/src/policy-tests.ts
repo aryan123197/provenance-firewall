@@ -96,7 +96,8 @@ export function generatePolicyTests(p: PolicyDoc): (Case & { policy: Policy })[]
     else state.totalSpentToday = spent;
     for (const [n, amt] of [["fits", 1], ["over", 2]] as const) {
       const fits = spent + amt <= cap;
-      const withinOthers = amt <= p.limits.perPayment && amt <= (p.categoryApprovalThresholds[first.category] ?? p.approvalThreshold);
+      // The payment must trip nothing but the cap under test: it has to fit under the other two caps and the approval threshold too.
+      const withinOthers = amt <= Math.min(p.limits.perPayment, p.limits.perVendorPerDay, p.limits.totalPerDay, p.categoryApprovalThresholds[first.category] ?? p.approvalThreshold);
       if (!withinOthers) continue;
       cases.push({
         id: `${id}-${n}`,
@@ -110,12 +111,12 @@ export function generatePolicyTests(p: PolicyDoc): (Case & { policy: Policy })[]
   }
 
   // Tolerance against a purchase order, using a base that stays under every threshold.
-  const baseAmt = Math.min(10_000, p.approvalThreshold, p.limits.perPayment);
+  const baseAmt = Math.min(10_000, p.approvalThreshold, p.limits.perPayment, p.limits.perVendorPerDay, p.limits.totalPerDay);
   if (baseAmt >= 100) {
     const edge = baseAmt + Math.floor((baseAmt * p.amountToleranceBps) / 10_000);
     const po = { id: "po", vendorId: first.id, amount: baseAmt, currency: cur };
     const invoice = (amt: number, id: string): ResolvedIntent => ({ ...trusted(first, amt, cur, id), amount: f("invoice", amt) });
-    const withinCaps = (amt: number) => amt <= p.limits.perPayment && amt <= (p.categoryApprovalThresholds[first.category] ?? p.approvalThreshold);
+    const withinCaps = (amt: number) => amt <= Math.min(p.limits.perPayment, p.limits.perVendorPerDay, p.limits.totalPerDay, p.categoryApprovalThresholds[first.category] ?? p.approvalThreshold);
     if (withinCaps(edge)) {
       cases.push({ id: "tolerance-edge", group: "thresholds", description: `An invoice of ${usd(edge)} against a ${usd(baseAmt)} purchase order is within the ${p.amountToleranceBps / 100}% tolerance`, intent: invoice(edge, "tolerance-edge"), state: { ...baseState(allVendors), purchaseOrder: po }, expect: { verdict: "allow" } });
     }
