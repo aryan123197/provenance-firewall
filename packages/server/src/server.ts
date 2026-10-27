@@ -85,6 +85,10 @@ export interface Server {
 }
 
 export function buildServer(cfg: ServerConfig): Server {
+  // Scenario runs move sandbox money when real PayPal credentials are set, so Slack must name who may start them.
+  if (cfg.slack && cfg.paypal && cfg.slack.allowedUsers.length === 0) {
+    throw new Error("SLACK_ALLOWED_USERS is required when Slack is enabled with PayPal credentials: a scenario run sends real sandbox payouts.");
+  }
   const policyYaml = readFileSync(cfg.policyPath, "utf8");
   const filePolicy = loadPolicy(policyYaml);
   const authority = new Authority(cfg.authorityKey);

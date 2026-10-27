@@ -134,7 +134,7 @@ export function registerSlack(app: FastifyInstance, deps: SlackDeps): void {
     if (!addressed || ev.bot_id || ev.subtype || !ev.user || !ev.channel) return reply.send({ ok: true });
     if (config.allowedUsers.length && !config.allowedUsers.includes(ev.user)) return reply.send({ ok: true });
 
-    void handle(ev);
+    handle(ev).catch(() => undefined);
     return reply.send({ ok: true });
   });
 }
