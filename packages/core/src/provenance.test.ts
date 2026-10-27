@@ -65,6 +65,10 @@ describe("resolveIntent bounds what an agent can send", () => {
     ["category", { category: { literal: "c".repeat(65) } }],
     ["literal", { payee: { literal: "x".repeat(1001) } }],
   ])("an oversized %s is rejected", (_n, o) => expect(bad(o).ok).toBe(false));
+  test.each([[0], [-1], [1.5], [Number.MAX_SAFE_INTEGER + 2]])("an amount of %s is rejected, and one cent is accepted", (n) => {
+    expect(bad({ amount: { literal: n } }).ok).toBe(false);
+    expect(bad({ amount: { literal: 1 } }).ok).toBe(true);
+  });
   test("the limit itself is accepted", () => {
     expect(bad({ idempotencyKey: "k".repeat(200), agentId: "a".repeat(100) }).ok).toBe(true);
   });
