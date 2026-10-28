@@ -18,7 +18,6 @@ Provenance Firewall is a policy layer between an LLM agent and PayPal that track
 - A signed, hash-chained audit log of every decision, including denials, that anyone can export and verify offline.
 - Reconciliation: PayPal webhooks are signature-checked and matched against what was authorized; anything PayPal did that we did not authorize shows up as drift.
 - A red-team harness: 26 scenarios run against an unprotected baseline and the firewalled agent, with a committed scorecard that includes the false-block rate.
-- A Slack input: mention the app with a scenario id and the same run happens against the live firewall, with the verdicts posted in the thread (approving a held payment stays in the dashboard). **[fill after live run: tested only against a stubbed Slack API so far; try it in a real workspace before you claim it]**
 - An operator dashboard: live activity, a decision-replay screen that shows each field's source, an approval inbox, a vendor registry, and policy and scorecard. Policies can be written in plain English; a model drafts a patch, and it activates only after generated tests pass and a person confirms.
 
 **Where PayPal is used**
@@ -55,7 +54,7 @@ Use demo mode (`pnpm dev:demo`, or the Render URL) and click through in this ord
 | --- | --- | --- |
 | 0:00 to 0:15 | Live activity, empty | "Agents can pay for things now. Here is how that goes wrong." |
 | 0:15 to 1:05 | **Try an attack** → *Invoice note redirects payment* → Run it. Left pane: unprotected agent, **Lost $450.00**, receiver `vendor-support@evil.example`. Right pane: same agent, **Denied · Payee changed**, no money moved. | "Same agent, same invoice. The unprotected one pays the attacker. Behind the firewall it is denied." |
-| 1:05 to 1:30 | Click the denied link → the decision page, **Where each field came from**: the field table, payee and account in red as untrusted, the sentence "Payee came from the invoice text, which is untrusted content", the rule list, then the audit trail with "Chain verified". | "It tracks where every field came from, so persuasion cannot change the outcome." |
+| 1:05 to 1:30 | Click the denied link → **decision replay**: the field table, payee and account in red as untrusted, the sentence "came from the invoice text, which is untrusted", the rule list, then the audit trail with "Chain verified". | "It tracks where every field came from, so persuasion cannot change the outcome." |
 | 1:30 to 1:55 | Run *Large invoice that needs a person* → **Approvals** → type a name → **Approve and pay $800.00** → the green confirmation. | "Real work still gets done: a person approves, once, bound to this exact payment." |
 | 1:55 to 2:20 | **Policy & scorecard** → type the example sentence → Compile → show the diff, any lint warning and the "tests passed" line → Confirm. *(needs a Claude key; if you have none, skip this row and say so)* **[fill after live run]** | "Policies are written in English, compiled to rules, tested, and only activated when you confirm." |
 | 2:20 to 2:45 | Scorecard: the bars and the table. Point at the one scenario where the firewalled side still loses $800. | "Twenty attacks: the unprotected agent lost money in all of them. The firewall in one, bounded by a daily cap. Zero legitimate payments wrongly denied." |
