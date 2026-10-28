@@ -321,3 +321,32 @@ describe("PayPalHttp error handling", () => {
     await expect(adapter.execute(allowed())).rejects.toMatchObject({ retryable: true, httpStatus: 502, body: "Bad Gateway from a proxy" });
   });
 });
+
+describe("OAuth tokens under concurrency", () => {
+  const tokenCalls = (fake: ReturnType<typeof createFakePayPal>) => fake.calls.filter((c) => c.path === "/v1/oauth2/token").length;
+
+  test("simultaneous first requests share one token request", async () => {
+    const { fake, adapter } = setup();
+    const results = await Promise.all(Array.from({ length: 10 }, (_, i) => adapter.execute(allowed(intent({ idempotencyKey: `c${i}` })))));
+    expect(results).toHaveLength(10);
+    expect(tokenCalls(fake)).toBe(1);
+    expect(fake.payoutPosts()).toHaveLength(10);
+  });
+
+  test("a revoked token is replaced once for all callers that hit it, and every payout still goes through", async () => {
+    const { fake, adapter } = setup();
+    await adapter.execute(allowed(intent({ idempotencyKey: "warm" }))); // token cached
+    fake.expireToken();
+    const results = await Promise.all(Array.from({ length: 8 }, (_, i) => adapter.execute(allowed(intent({ idempotencyKey: `r${i}` })))));
+    expect(results.every((r) => r.reference)).toBe(true);
+    expect(tokenCalls(fake)).toBe(2); // the first one, and a single refresh
+  });
+
+  test("a failed token request is not remembered: the next call tries again", async () => {
+    const { fake, adapter } = setup();
+    const bad = new PayPalAdapter({ clientId: "wrong", clientSecret: "creds", authority, baseUrl: "http://localhost:9999", fetch: fake.fetch });
+    await expect(bad.execute(allowed())).rejects.toBeInstanceOf(AdapterError);
+    await expect(bad.execute(allowed())).rejects.toBeInstanceOf(AdapterError);
+    expect(tokenCalls(fake)).toBe(2);
+  });
+});

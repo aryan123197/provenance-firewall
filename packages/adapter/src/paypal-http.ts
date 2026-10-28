@@ -23,6 +23,8 @@ export class PayPalHttp {
   private readonly f: typeof fetch;
   private readonly timeoutMs: number;
   private token: { value: string; expiresAt: number } | null = null;
+  /** One token request at a time: concurrent callers share it instead of each fetching (and possibly invalidating) their own. */
+  private tokenRequest: Promise<string> | null = null;
 
   constructor(private readonly cfg: PayPalHttpConfig) {
     this.base = (cfg.baseUrl ?? PAYPAL_SANDBOX_URL).replace(/\/$/, "");
@@ -53,15 +55,23 @@ export class PayPalHttp {
       }
     } catch (e) {
       if (e instanceof AdapterError && e.httpStatus === 401 && retryAuth) {
-        this.token = null;
+        // Drop only the token that was rejected: a concurrent caller may already have replaced it with a fresh one.
+        if (this.token?.value === token) this.token = null;
         return this.request(method, path, body, headers, false);
       }
       throw e;
     }
   }
 
-  private async accessToken(): Promise<string> {
-    if (this.token && this.token.expiresAt > this.now() + 30_000) return this.token.value;
+  private accessToken(): Promise<string> {
+    if (this.token && this.token.expiresAt > this.now() + 30_000) return Promise.resolve(this.token.value);
+    this.tokenRequest ??= this.fetchToken().finally(() => {
+      this.tokenRequest = null;
+    });
+    return this.tokenRequest;
+  }
+
+  private async fetchToken(): Promise<string> {
     const basic = Buffer.from(`${this.cfg.clientId}:${this.cfg.clientSecret}`).toString("base64");
     const res = await this.send(`${this.base}/v1/oauth2/token`, {
       method: "POST",
