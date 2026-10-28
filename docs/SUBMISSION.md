@@ -76,6 +76,16 @@ Rehearse once with a timer. Do not claim live PayPal in the video unless you hav
 | Demo video, YouTube, under 3 minutes | Yours to record; script above |
 | Registered on Devpost; submit before the deadline and confirm it shows as submitted, not draft | Yours |
 
+## Deploying on Render
+
+The blueprint (`render.yaml`) builds with `pnpm install --frozen-lockfile && pnpm build` and starts with `pnpm start`; both were run from a clean clone of `main` and worked. In order:
+
+1. New **Blueprint** on Render, pointed at this repo. It reads `render.yaml` and sets `DEMO_MODE`, `OPEN_OPERATOR`, `TRUST_PROXY` and a generated `AUTHORITY_KEY`.
+2. Set `AUDIT_SIGNING_KEY` to the output of `pnpm gen:audit-key`. Without it, every restart signs new audit entries with a new key: the log still verifies (the export carries every key), but a stable key is easier to explain.
+3. Optional, in the Render environment settings: `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` switch the server from simulated to the PayPal sandbox; `PAYPAL_WEBHOOK_ID` (from `pnpm register:webhook`) turns on webhook reconciliation; `ANTHROPIC_API_KEY` enables the plain-English policy editor and the live Claude agent; `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN` and, with PayPal credentials, `SLACK_ALLOWED_USERS` enable the Slack input.
+4. Open the URL and check `/api/status`: it should show your mode (*simulated* or *sandbox*), the audit chain as valid, and `compilerAvailable` / `llmAgentAvailable` matching the keys you set.
+5. The free plan sleeps when idle and the database lives in `/tmp`, so history is lost on a restart and the first request after a sleep is slow. Open the page a minute before you record, and run each scenario once to warm it up.
+
 ## Before you submit
 
 ```sh
