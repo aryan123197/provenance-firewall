@@ -253,6 +253,11 @@ tbody th { font-weight: 600; white-space: nowrap; }
   .fields tr { display: block; border-bottom: 1px solid var(--border); padding: 6px 0; }
   .fields th, .fields td { display: block; border: 0; padding: 2px 6px; }
 }
+/* The activity grid on a phone: a tighter pill, so "Needs approval" is not clipped next to the payee and amount. */
+@media (max-width: 700px) {
+  .grid-wrap .pill { gap: 4px; font-size: 12px; padding: 2px 7px; }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .btn, nav a, .segmented button { transition: background 0.12s, filter 0.12s; }
 }

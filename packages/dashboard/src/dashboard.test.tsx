@@ -3,6 +3,8 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { OperatorSignIn } from "./App";
+import { activityColumns } from "./screens/Activity";
+import { useNarrow } from "./hooks";
 import { api, operatorToken, type Approval, type CompileResult, type PolicyView } from "./api";
 import { Approvals } from "./screens/Approvals";
 import { PolicyEditor } from "./screens/PolicyEditor";
@@ -387,5 +389,71 @@ describe("text from invoices and emails is shown as text, never as markup", () =
     expect(container.querySelector("img, script, svg[onload], [onerror], [onload]")).toBeNull();
     expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
     expect(container.textContent).toContain(payload.slice(0, 40));
+  });
+});
+
+describe("activity grid on small screens", () => {
+  const shown = (narrow: boolean) => activityColumns(narrow).filter((c) => !c.hide).map((c) => c.headerName);
+
+  test("a wide screen shows every column", () => {
+    expect(shown(false)).toEqual(["Time", "Verdict", "Rule that decided", "Payee", "Amount", "Source", "Outcome"]);
+  });
+
+  test("a phone keeps what identifies the payment (verdict, payee, amount) and drops the rest", () => {
+    expect(shown(true)).toEqual(["Verdict", "Payee", "Amount"]);
+  });
+
+  const row = { createdAt: "2026-10-28T12:00:00.000Z", idempotencyKey: "k 1", payee: "Acme", amount: 100, currency: "USD", verdict: "require_approval" };
+  const render1 = (c: { cellRenderer?: unknown } | undefined) => (c!.cellRenderer as (p: unknown) => { type: string; props: { href?: string; title?: string; "aria-label"?: string } })({ data: row });
+
+  test("every row stays reachable from the keyboard: the time is the link on a wide screen, the payee on a phone", () => {
+    const wide = activityColumns(false);
+    expect(render1(wide.find((c) => c.headerName === "Time")).props.href).toBe("#/decision/k%201");
+    expect(render1(wide.find((c) => c.headerName === "Payee")).type).toBe("span"); // not a second link on the same row
+
+    const narrow = activityColumns(true);
+    const link = render1(narrow.find((c) => c.headerName === "Payee"));
+    expect(link.type).toBe("a");
+    expect(link.props.href).toBe("#/decision/k%201");
+    expect(link.props["aria-label"]).toContain("Acme");
+    expect(link.props["aria-label"]).toContain("require approval");
+  });
+
+  test("the payee is given room, and the full value is on hover when it is clipped", () => {
+    const payee = activityColumns(false).find((c) => c.headerName === "Payee")!;
+    expect(payee.minWidth).toBeGreaterThanOrEqual(220); // fits an address like vendor-support@evil.example
+    const cell = (payee.cellRenderer as (p: unknown) => { props: { title: string } })({ data: { payee: "vendor-support@evil.example" } });
+    expect(cell.props.title).toBe("vendor-support@evil.example");
+  });
+});
+
+describe("useNarrow", () => {
+  function Probe() {
+    return <p>{useNarrow(700) ? "narrow" : "wide"}</p>;
+  }
+  const stubMedia = (initial: boolean) => {
+    let listener: (() => void) | undefined;
+    const mq = { matches: initial, addEventListener: (_: string, l: () => void) => (listener = l), removeEventListener: () => (listener = undefined) };
+    vi.stubGlobal("matchMedia", vi.fn(() => mq));
+    return (matches: boolean) => {
+      mq.matches = matches;
+      listener?.();
+    };
+  };
+
+  test("reports the current width and follows a resize", async () => {
+    const resize = stubMedia(true);
+    render(<Probe />);
+    expect(screen.getByText("narrow")).toBeTruthy();
+    resize(false);
+    await screen.findByText("wide");
+    resize(true);
+    await screen.findByText("narrow");
+  });
+
+  test("is simply false where media queries do not exist", () => {
+    vi.stubGlobal("matchMedia", undefined);
+    render(<Probe />);
+    expect(screen.getByText("wide")).toBeTruthy();
   });
 });
