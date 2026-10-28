@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import fc from "fast-check";
 import { describe, expect, test } from "vitest";
-import { ProvenanceContext, loadPolicy } from "@pfw/core";
+import { ProvenanceContext, applyPatch, loadPolicy } from "@pfw/core";
 import { Authority, PayPalAdapter } from "@pfw/adapter";
 import { createFakePayPal } from "@pfw/adapter/testing";
-import { IdempotencyConflictError, Store } from "@pfw/store";
+import { ApprovalStateError, IdempotencyConflictError, PolicyConflictError, Store } from "@pfw/store";
 import { Firewall } from "./index";
 
 /**
@@ -198,6 +198,79 @@ describe("racing payments cannot together exceed a cap", () => {
       expect(outcomes.every((o) => o.status === "executed")).toBe(true);
       expect(new Set(outcomes.map((o) => (o.status === "executed" ? o.receipt.reference : ""))).size).toBe(1);
       expect(fake.payouts).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe("racing approvals", () => {
+  /** A $800 payment from a trusted record: above the $500 threshold, so it waits for a person. */
+  const held = async () => {
+    const w = world();
+    w.ctx.register("user:req#eight-hundred", 80_000);
+    const out = await w.fw.submit(
+      { agentId: "a", idempotencyKey: "big", payee: { handle: "vendor:acme#name" }, account: { handle: "vendor:acme#account" }, amount: { handle: "user:req#eight-hundred" }, currency: { handle: "user:req#currency" }, category: { handle: "vendor:acme#category" } } as never,
+      w.ctx,
+    );
+    expect(out.status).toBe("needs_approval");
+    return { ...w, approvalId: (out as { approvalId: string }).approvalId };
+  };
+
+  test("ten people approving the same request at once pay it exactly once", async () => {
+    const { store, fake, fw, approvalId } = await held();
+    try {
+      const results = await Promise.allSettled(Array.from({ length: 10 }, (_, i) => fw.resolveApproval(approvalId, { approver: `ops${i}@company.example`, approve: true })));
+      expect(fake.payouts).toHaveLength(1);
+      expect(fake.payouts[0]!.amount).toBe(80_000);
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      // Single use: everyone else is told it is already resolved (the API answers 409), never a second payment or an untyped crash.
+      const losers = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+      expect(losers).toHaveLength(9);
+      for (const l of losers) expect(l.reason).toBeInstanceOf(ApprovalStateError);
+      expect(store.audit.verify()).toMatchObject({ ok: true });
+    } finally {
+      store.close();
+    }
+  });
+
+  test("an approval racing a rejection has one winner, and money moves only if the approval won", async () => {
+    for (const order of ["approve first", "reject first"]) {
+      const { store, fake, fw, approvalId } = await held();
+      try {
+        const calls = [() => fw.resolveApproval(approvalId, { approver: "a@company.example", approve: true }), () => fw.resolveApproval(approvalId, { approver: "r@company.example", approve: false })];
+        if (order === "reject first") calls.reverse();
+        const results = await Promise.allSettled(calls.map((c) => c()));
+        const final = store.getApprovalByKey("big")!;
+        expect(["approved", "rejected"]).toContain(final.status);
+        expect(fake.payouts).toHaveLength(final.status === "approved" ? 1 : 0);
+        expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+        const loser = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
+        expect(loser?.reason).toBeInstanceOf(ApprovalStateError);
+        expect(store.audit.verify()).toMatchObject({ ok: true });
+      } finally {
+        store.close();
+      }
+    }
+  });
+
+  test("two policy activations from the same base version: one wins, the other is told the policy moved", async () => {
+    const { store } = world();
+    try {
+      const doc = applyPatch(policy, { approvalThreshold: 40_000 });
+      const activate = (who: string) => {
+        try {
+          return store.activatePolicy({ baseVersion: policy.version, doc, confirmedBy: who });
+        } catch (e) {
+          return e;
+        }
+      };
+      const [a, b] = await Promise.all([Promise.resolve().then(() => activate("one@company.example")), Promise.resolve().then(() => activate("two@company.example"))]);
+      const errors = [a, b].filter((r) => r instanceof Error);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toBeInstanceOf(PolicyConflictError);
+      expect(store.listPolicyVersions().filter((v) => v.active)).toHaveLength(1);
+      expect(store.listPolicyVersions()).toHaveLength(1);
     } finally {
       store.close();
     }
