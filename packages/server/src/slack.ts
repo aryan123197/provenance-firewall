@@ -117,7 +117,11 @@ export function registerSlack(app: FastifyInstance, deps: SlackDeps): void {
       return reply.code(401).send({ error: "bad signature" });
     }
     const body = (req.body ?? {}) as Envelope;
-    if (body.type === "url_verification") return reply.send({ challenge: String(body.challenge ?? "") });
+    if (body.type === "url_verification") {
+      // Slack sends a string. Anything else is not a challenge to echo (and stringifying an arbitrary value can throw).
+      if (typeof body.challenge !== "string") return reply.code(400).send({ error: "challenge must be a string" });
+      return reply.send({ challenge: body.challenge });
+    }
     if (body.type !== "event_callback" || !body.event) return reply.send({ ok: true });
 
     // Slack retries after 3 seconds if it has not seen a 200, and a run can take longer than that. Acknowledge first, work after.

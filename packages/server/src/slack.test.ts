@@ -94,6 +94,21 @@ describe("Slack events", () => {
     expect(r.json()).toEqual({ challenge: "abc123" });
   });
 
+  test.each([
+    ["an object whose toString is not callable", { toString: false }],
+    ["an object", { a: 1 }],
+    ["an array", []],
+    ["a number", 7],
+    ["null", null],
+  ])("a challenge that is %s is a 400, not a crash", async (_n, challenge) => {
+    const r = await send({ type: "url_verification", challenge });
+    expect(r.statusCode).toBe(400);
+  });
+
+  test("a missing challenge is a 400 too", async () => {
+    expect((await send({ type: "url_verification" })).statusCode).toBe(400);
+  });
+
   test("a mention runs the scenario on the live firewall and replies in a thread", async () => {
     const r = await send(mention("inj-note-redirect"));
     expect(r.statusCode).toBe(200);
