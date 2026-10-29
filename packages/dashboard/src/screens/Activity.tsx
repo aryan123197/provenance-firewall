@@ -3,20 +3,16 @@ import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import { useMemo, useRef, useState } from "react";
 import { api, type DecisionSummary, type DemoRun, type DemoScenario } from "../api";
 import { Card, Empty, ErrorNote, TrustChip, VerdictPill } from "../components/ui";
-import { usePoll } from "../hooks";
+import { useNarrow, usePoll } from "../hooks";
 import { CATEGORY_LABEL, money, outcome, ruleTitle, time } from "../labels";
 import { gridTheme } from "../theme";
 
-export function Activity({ open, demo, llm, onChange }: { open: (to: string) => void; demo: boolean; llm: boolean; onChange: () => void }) {
-  const { data, error, refresh } = usePoll(api.decisions, 2500);
-  const [filter, setFilter] = useState("");
-  const [verdict, setVerdict] = useState<"all" | DecisionSummary["verdict"]>("all");
-  const gridBox = useRef<HTMLDivElement>(null);
-
-  const rows = useMemo(() => (data ?? []).filter((d) => verdict === "all" || d.verdict === verdict), [data, verdict]);
-
-  const cols = useMemo<ColDef<DecisionSummary>[]>(
-    () => [
+/**
+ * The activity grid's columns. On a narrow screen only what identifies a payment stays (verdict, payee, amount): the time, the rule,
+ * the payee's source and the outcome are all on the decision page one tap away, and cramming them in leaves the payee off screen.
+ */
+export function activityColumns(narrow: boolean): ColDef<DecisionSummary>[] {
+  const all: ColDef<DecisionSummary>[] = [
       {
         headerName: "Time",
         field: "createdAt",
@@ -33,15 +29,49 @@ export function Activity({ open, demo, llm, onChange }: { open: (to: string) => 
             </a>
           ) : null,
       },
-      { headerName: "Verdict", field: "verdict", width: 170, cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <VerdictPill verdict={p.data.verdict} /> : null) },
-      { headerName: "Rule that decided", field: "rule", flex: 1.3, minWidth: 190, valueFormatter: (p) => ruleTitle(p.value as string), cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <span>{ruleTitle(p.data.rule)}{p.data.alert && <span className="alert-dot" title="Raised an alert"> ⚑</span>}</span> : null) },
-      { headerName: "Payee", field: "payee", flex: 1.2, minWidth: 160 },
+      { headerName: "Verdict", field: "verdict", width: 164, cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <VerdictPill verdict={p.data.verdict} /> : null) },
+      { headerName: "Rule that decided", field: "rule", flex: 1.3, minWidth: 225, valueFormatter: (p) => ruleTitle(p.value as string), cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <span>{ruleTitle(p.data.rule)}{p.data.alert && <span className="alert-dot" title="Raised an alert"> ⚑</span>}</span> : null) },
+      {
+        headerName: "Payee",
+        field: "payee",
+        flex: 1.2,
+        minWidth: narrow ? 100 : 230,
+        // The payee is the key evidence in an attack (the attacker's address), so a long value is readable on hover when it is clipped.
+        // On a phone the Time column is gone, so the payee is the link into the decision.
+        cellRenderer: (p: ICellRendererParams<DecisionSummary>) =>
+          !p.data ? null : narrow ? (
+            <a href={`#/decision/${encodeURIComponent(p.data.idempotencyKey)}`} title={p.data.payee} aria-label={`Open decision: ${p.data.payee}, ${money(p.data.amount, p.data.currency)}, ${p.data.verdict.replace("_", " ")}`}>
+              {p.data.payee}
+            </a>
+          ) : (
+            <span title={p.data.payee}>{p.data.payee}</span>
+          ),
+      },
       { headerName: "Amount", field: "amount", width: 130, type: "rightAligned", filter: "agNumberColumnFilter", valueFormatter: (p) => money(p.value as number, p.data?.currency) },
-      { headerName: "Source", headerTooltip: "Where the payee came from", field: "payeeTrust", width: 110, filter: "agNumberColumnFilter", cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <TrustChip trust={p.data.payeeTrust} compact /> : null) },
-      { headerName: "Outcome", flex: 1, minWidth: 190, valueGetter: (p) => (p.data ? outcome(p.data) : "") },
-    ],
-    [],
-  );
+      { headerName: "Source", headerTooltip: "Where the payee came from", field: "payeeTrust", width: 100, filter: "agNumberColumnFilter", cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <TrustChip trust={p.data.payeeTrust} compact /> : null) },
+      { headerName: "Outcome", flex: 1, minWidth: 165, valueGetter: (p) => (p.data ? outcome(p.data) : "") },
+  ];
+  return all.map((c) => {
+    // Per-column filter buttons crowd the headers on a phone; the search box and the verdict buttons above the grid do the filtering.
+    if (narrow) c = { ...c, suppressHeaderFilterButton: true };
+    if (narrow && ["createdAt", "rule", "payeeTrust"].includes(String(c.field))) return { ...c, hide: true };
+    if (narrow && c.headerName === "Outcome") return { ...c, hide: true };
+    if (narrow && c.field === "verdict") return { ...c, width: 124 };
+    if (narrow && c.field === "amount") return { ...c, width: 106 };
+    return c;
+  });
+}
+
+export function Activity({ open, demo, llm, onChange }: { open: (to: string) => void; demo: boolean; llm: boolean; onChange: () => void }) {
+  const { data, error, refresh } = usePoll(api.decisions, 2500);
+  const [filter, setFilter] = useState("");
+  const [verdict, setVerdict] = useState<"all" | DecisionSummary["verdict"]>("all");
+  const gridBox = useRef<HTMLDivElement>(null);
+
+  const rows = useMemo(() => (data ?? []).filter((d) => verdict === "all" || d.verdict === verdict), [data, verdict]);
+
+  const narrow = useNarrow();
+  const cols = useMemo(() => activityColumns(narrow), [narrow]);
 
   return (
     <div className="stack">

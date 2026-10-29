@@ -115,7 +115,8 @@ describe("API fuzzing", () => {
           });
           expect(res.statusCode, fail(res.statusCode, "POST", "/api/slack/events", payload)).toBeLessThan(500);
         }),
-        { numRuns: 600 },
+        // The first example is an input that failed CI on a random seed: a challenge object whose toString is not callable.
+        { numRuns: 600, examples: [[{ type: "url_verification", challenge: { toString: false } }]] },
       );
       await new Promise((r) => setTimeout(r, 200));
       expect(rejections).toEqual([]);
