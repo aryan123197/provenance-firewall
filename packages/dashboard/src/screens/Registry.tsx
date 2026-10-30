@@ -85,11 +85,11 @@ function VendorsCard({ vendors, onSaved }: { vendors: Vendor[]; onSaved: () => v
           <tbody>
             {vendors.map((v) => (
               <tr key={v.id}>
-                <td><code>{v.id}</code></td>
-                <td>{v.name}</td>
-                <td className="mono">{v.account}</td>
-                <td>{v.category}</td>
-                <td><button className="link" onClick={() => { setForm(v); setAck(false); setMsg(undefined); }}>Edit</button></td>
+                <td data-label="Id"><code>{v.id}</code></td>
+                <td data-label="Name">{v.name}</td>
+                <td className="mono" data-label="Pays into">{v.account}</td>
+                <td data-label="Category">{v.category}</td>
+                <td data-label=""><button className="link" onClick={() => { setForm(v); setAck(false); setMsg(undefined); }}>Edit</button></td>
               </tr>
             ))}
           </tbody>
@@ -159,10 +159,10 @@ function OrdersCard({ vendors, orders, onSaved }: { vendors: Vendor[]; orders: P
           <tbody>
             {orders.map((o) => (
               <tr key={o.id}>
-                <td><code>{o.id}</code></td>
-                <td>{vendorName(o.vendorId)}</td>
-                <td>{money(o.amount, o.currency)}</td>
-                <td><span className={`status-chip ${o.status === "open" ? "ok" : ""}`}>{o.status === "open" ? "Open" : "Paid and closed"}</span></td>
+                <td data-label="Id"><code>{o.id}</code></td>
+                <td data-label="Vendor">{vendorName(o.vendorId)}</td>
+                <td data-label="Amount">{money(o.amount, o.currency)}</td>
+                <td data-label="Status"><span className={`status-chip ${o.status === "open" ? "ok" : ""}`}>{o.status === "open" ? "Open" : "Paid and closed"}</span></td>
               </tr>
             ))}
           </tbody>

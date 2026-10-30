@@ -242,6 +242,9 @@ tbody th { font-weight: 600; white-space: nowrap; }
 
 @media (max-width: 640px) {
   .topbar { padding: 10px 14px; gap: 10px; }
+  /* Four tabs do not fit in one row at 390px: let them wrap rather than push the whole page sideways and clip the last one. */
+  nav { flex-wrap: wrap; max-width: 100%; }
+  nav a { padding: 8px 10px; white-space: nowrap; }
   .statusbar { margin-left: 0; }
   main { padding: 16px 12px 32px; }
   .search { width: 100%; }
@@ -256,6 +259,16 @@ tbody th { font-weight: 600; white-space: nowrap; }
 /* The activity grid on a phone: a tighter pill, so "Needs approval" is not clipped next to the payee and amount. */
 @media (max-width: 700px) {
   .grid-wrap .pill { gap: 4px; font-size: 12px; padding: 2px 7px; }
+}
+
+/* The registry tables on a phone: each row becomes a small card with labelled values, so nothing is squeezed into one-character-wide
+   columns and the page does not scroll sideways. */
+@media (max-width: 640px) {
+  .registry thead { display: none; }
+  .registry tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .registry td { display: flex; gap: 10px; align-items: baseline; border: 0; padding: 2px 6px; overflow-wrap: anywhere; }
+  .registry td::before { content: attr(data-label); flex: 0 0 82px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .registry td[data-label=""]::before { display: none; }
 }
 
 @media (prefers-reduced-motion: no-preference) {

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { OperatorSignIn } from "./App";
 import { activityColumns } from "./screens/Activity";
+import { scorecardColumns } from "./screens/Policy";
 import { useNarrow } from "./hooks";
 import { api, operatorToken, type Approval, type CompileResult, type PolicyView } from "./api";
 import { Approvals } from "./screens/Approvals";
@@ -455,5 +456,35 @@ describe("useNarrow", () => {
     vi.stubGlobal("matchMedia", undefined);
     render(<Probe />);
     expect(screen.getByText("wide")).toBeTruthy();
+  });
+});
+
+describe("scorecard grid on small screens", () => {
+  const shown = (narrow: boolean) => scorecardColumns(narrow).filter((c) => !c.hide).map((c) => c.headerName);
+  test("wide shows every column", () => {
+    expect(shown(false)).toEqual(["Scenario", "Category", "Unprotected", "Firewalled", "Rules that fired"]);
+  });
+  test("a phone keeps the scenario and what it cost with and without the firewall", () => {
+    expect(shown(true)).toEqual(["Scenario", "Unprotected", "Firewalled"]);
+  });
+});
+
+describe("registry tables on small screens", () => {
+  // Under 640px each row is shown as a card, and the header row is hidden, so every value has to carry its own label.
+  test("every vendor and purchase-order value is labelled", async () => {
+    mockApi({
+      "GET /api/registry": {
+        body: {
+          vendors: [{ id: "acme", name: "Acme Supplies", account: "acme@sandbox.example", category: "office_supplies" }],
+          purchaseOrders: [{ id: "po-1", vendorId: "acme", amount: 45000, currency: "USD", status: "open" }],
+        },
+      },
+    });
+    const { container } = render(<RegistryScreen />);
+    await screen.findByRole("button", { name: "Edit" });
+    const labels = (table: Element) => [...table.querySelectorAll("tbody tr:first-child td")].map((td) => td.getAttribute("data-label"));
+    const [vendors, orders] = [...container.querySelectorAll("table.registry")];
+    expect(labels(vendors!)).toEqual(["Id", "Name", "Pays into", "Category", ""]);
+    expect(labels(orders!)).toEqual(["Id", "Vendor", "Amount", "Status"]);
   });
 });
