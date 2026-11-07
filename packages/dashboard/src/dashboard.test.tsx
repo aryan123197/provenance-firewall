@@ -497,3 +497,28 @@ describe("activity summary", () => {
     expect(s).toMatchObject({ total: 4, allow: 1, deny: 2, require_approval: 1, blocked: 450, paid: 100, otherCurrency: 1 });
   });
 });
+
+describe("registry and scorecard filters", () => {
+  test("purchase orders filter by status and by search text", async () => {
+    const { filterOrders } = await import("./screens/Registry");
+    const orders = [
+      { id: "po-1", vendorId: "acme", amount: 45000, currency: "USD", status: "open" },
+      { id: "po-2", vendorId: "beta", amount: 30000, currency: "USD", status: "paid" },
+    ] as never[];
+    const name = (id: string) => (id === "acme" ? "Acme Supplies" : "Beta Software");
+    expect(filterOrders(orders, "open", "", name).map((o) => o.id)).toEqual(["po-1"]);
+    expect(filterOrders(orders, "closed", "", name).map((o) => o.id)).toEqual(["po-2"]);
+    expect(filterOrders(orders, "all", "beta", name).map((o) => o.id)).toEqual(["po-2"]);
+    expect(filterOrders(orders, "all", "$450", name).map((o) => o.id)).toEqual(["po-1"]);
+  });
+
+  test("scorecard filter separates attacks, legitimate runs and money lost with the firewall", async () => {
+    const { filterScenarios } = await import("./screens/Policy");
+    const r = (id: string, kind: string, lost: number) => ({ id, kind, firewalled: { unauthorizedPayouts: lost } }) as never;
+    const list = [r("a", "attack", 0), r("b", "attack", 1), r("c", "legit", 0)];
+    expect(filterScenarios(list, "attack")).toHaveLength(2);
+    expect(filterScenarios(list, "legit")).toHaveLength(1);
+    expect(filterScenarios(list, "lost").map((x: { id: string }) => x.id)).toEqual(["b"]);
+    expect(filterScenarios(list, "all")).toHaveLength(3);
+  });
+});

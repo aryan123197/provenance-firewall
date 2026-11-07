@@ -1,6 +1,6 @@
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { api, type Drift, type ScenarioResultView } from "../api";
 import { Card, Empty, ErrorNote } from "../components/ui";
 import { PolicyEditor } from "./PolicyEditor";
@@ -70,11 +70,11 @@ export const SCORECARD_ROW_NARROW = 68;
 
 export function scorecardColumns(narrow: boolean): ColDef<ScenarioResultView>[] {
   const all: ColDef<ScenarioResultView>[] = [
-    { headerName: "Scenario", field: "title", flex: narrow ? 1.2 : 1.6, minWidth: narrow ? 100 : 240 },
+    { headerName: "Scenario", field: "title", flex: narrow ? 1.2 : 1.6, minWidth: narrow ? 100 : 240, tooltip: true },
     { headerName: "Category", field: "category", width: 160, valueFormatter: (p) => CATEGORY_LABEL[p.value as string] ?? String(p.value) },
     { headerName: "Unprotected", flex: 1, minWidth: narrow ? 100 : 170, valueGetter: (p) => (p.data ? side(p.data, "baseline") : ""), cellRenderer: sideCell("baseline") },
     { headerName: "Firewalled", flex: 1, minWidth: narrow ? 108 : 190, valueGetter: (p) => (p.data ? side(p.data, "firewalled") : ""), cellRenderer: sideCell("firewalled") },
-    { headerName: "Rules that fired", valueGetter: (p) => p.data?.firewalled.rules.map((r) => RULES[r]?.title ?? r).join(", ") ?? "", flex: 1.4, minWidth: 220 },
+    { headerName: "Rules that fired", valueGetter: (p) => p.data?.firewalled.rules.map((r) => RULES[r]?.title ?? r).join(", ") ?? "", flex: 1.4, minWidth: 220, tooltip: true },
   ];
   if (!narrow) return all;
   // Long titles and outcomes wrap onto a second line instead of being cut off; the grid gives rows room for three lines (see SCORECARD_ROW_NARROW).
@@ -90,6 +90,8 @@ function Scorecard() {
 
   const narrow = useNarrow();
   const cols = useMemo(() => scorecardColumns(narrow), [narrow]);
+  const [show, setShow] = useState<ScorecardFilter>("all");
+  const rows = useMemo(() => filterScenarios(card?.scenarios ?? [], show), [card, show]);
 
   if (error && !card) return <Card title="Red-team scorecard"><Empty title="No scorecard yet">Run <code>pnpm harness</code> to generate one.</Empty></Card>;
   if (!card) return null;
@@ -110,10 +112,18 @@ function Scorecard() {
       <p className="caveat">
         The agent here is <strong>{card.agent}</strong>, a deterministic stand-in that follows instructions found in documents, and payments go to a simulated PayPal. These numbers measure the firewall, not any real model. Requests held for approval count as no money moved; the harness does not model a careless approver.
       </p>
+      <div className="toolbar" style={{ marginBottom: 10 }}>
+        <div className="segmented" role="group" aria-label="Filter scenarios">
+          {SCORECARD_FILTERS.map(([key, label]) => (
+            <button key={key} aria-pressed={show === key} onClick={() => setShow(key)}>{label}</button>
+          ))}
+        </div>
+        <span className="muted small" role="status">{rows.length} of {card.scenarios.length} scenarios</span>
+      </div>
       <div className="grid-wrap" style={{ height: 560 }}>
         <AgGridReact<ScenarioResultView>
           theme={gridTheme}
-          rowData={card.scenarios}
+          rowData={rows}
           columnDefs={cols}
           defaultColDef={{ sortable: true, resizable: true, filter: true }}
           getRowId={(p) => p.data.id}
@@ -123,6 +133,15 @@ function Scorecard() {
       </div>
     </Card>
   );
+}
+
+export type ScorecardFilter = "all" | "attack" | "legit" | "lost";
+const SCORECARD_FILTERS: [ScorecardFilter, string][] = [["all", "All"], ["attack", "Attacks"], ["legit", "Legitimate"], ["lost", "Money lost with firewall"]];
+
+export function filterScenarios(list: ScenarioResultView[], show: ScorecardFilter): ScenarioResultView[] {
+  if (show === "attack" || show === "legit") return list.filter((r) => r.kind === show);
+  if (show === "lost") return list.filter((r) => r.kind === "attack" && r.firewalled.unauthorizedPayouts > 0);
+  return list;
 }
 
 function side(r: ScenarioResultView, which: "baseline" | "firewalled"): string {

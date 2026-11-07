@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api, type PurchaseOrderRow, type Vendor } from "../api";
 import { Card, Empty, ErrorNote } from "../components/ui";
 import { usePoll } from "../hooks";
@@ -88,7 +88,7 @@ function VendorsCard({ vendors, onSaved }: { vendors: Vendor[]; onSaved: () => v
                 <td data-label="Id"><code>{v.id}</code></td>
                 <td data-label="Name">{v.name}</td>
                 <td className="mono" data-label="Pays into">{v.account}</td>
-                <td data-label="Category">{v.category}</td>
+                <td data-label="Category"><span className="chip">{v.category}</span></td>
                 <td data-label=""><button className="link" onClick={() => { setForm(v); setAck(false); setMsg(undefined); }}>Edit</button></td>
               </tr>
             ))}
@@ -123,12 +123,33 @@ function VendorsCard({ vendors, onSaved }: { vendors: Vendor[]; onSaved: () => v
   );
 }
 
+/** Orders shown before the rest fold behind "Show all". */
+export const ORDER_PREVIEW = 8;
+
+export function filterOrders(orders: PurchaseOrderRow[], status: "all" | "open" | "closed", q: string, vendorName: (id: string) => string): PurchaseOrderRow[] {
+  const needle = q.trim().toLowerCase();
+  return orders.filter((o) => {
+    if (status === "open" && o.status !== "open") return false;
+    if (status === "closed" && o.status === "open") return false;
+    if (!needle) return true;
+    return [o.id, vendorName(o.vendorId), money(o.amount, o.currency)].some((t) => t.toLowerCase().includes(needle));
+  });
+}
+
 function OrdersCard({ vendors, orders, onSaved }: { vendors: Vendor[]; orders: PurchaseOrderRow[]; onSaved: () => void }) {
   const [form, setForm] = useState({ id: "", vendorId: "", amount: "", currency: "USD" });
   const [name, setName] = useState(readName);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | undefined>();
   const vendorName = (id: string) => vendors.find((v) => v.id === id)?.name ?? id;
+  const [status, setStatus] = useState<"all" | "open" | "closed">("all");
+  const [q, setQ] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const openCount = orders.filter((o) => o.status === "open").length;
+  const filtered = useMemo(() => filterOrders(orders, status, q, vendorName), [orders, status, q, vendors]);
+  const searching = status !== "all" || q.trim() !== "";
+  // A long list hides behind a "show all" toggle; while filtering, every match is shown so nothing is silently left out.
+  const visible = showAll || searching ? filtered : filtered.slice(0, ORDER_PREVIEW);
 
   const save = async () => {
     const cents = Math.round(Number(form.amount) * 100);
@@ -150,14 +171,26 @@ function OrdersCard({ vendors, orders, onSaved }: { vendors: Vendor[]; orders: P
   };
 
   return (
-    <Card title="Purchase orders" aside={<span className="muted small">An order covers one payment, then closes</span>}>
+    <Card title="Purchase orders" aside={<span className="muted small">{orders.length > 0 ? `${openCount} open · ${orders.length - openCount} closed · ` : ""}An order covers one payment, then closes</span>}>
       {orders.length === 0 ? (
         <Empty title="No purchase orders">An invoice amount that no order backs needs a person's approval.</Empty>
       ) : (
+        <>
+        {orders.length > ORDER_PREVIEW && (
+          <div className="toolbar" style={{ marginBottom: 10 }}>
+            <div className="segmented" role="group" aria-label="Filter purchase orders by status">
+              {(["all", "open", "closed"] as const).map((v) => (
+                <button key={v} aria-pressed={status === v} onClick={() => setStatus(v)}>{v === "all" ? "All" : v === "open" ? "Open" : "Paid and closed"}</button>
+              ))}
+            </div>
+            <input className="search" type="search" placeholder="Search id, vendor, amount" aria-label="Search purchase orders" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+        )}
         <table className="registry">
           <thead><tr><th>Id</th><th>Vendor</th><th>Amount</th><th>Status</th></tr></thead>
           <tbody>
-            {orders.map((o) => (
+            {visible.length === 0 && <tr><td colSpan={4} className="muted">No purchase orders match.</td></tr>}
+            {visible.map((o) => (
               <tr key={o.id}>
                 <td data-label="Id"><code>{o.id}</code></td>
                 <td data-label="Vendor">{vendorName(o.vendorId)}</td>
@@ -167,6 +200,12 @@ function OrdersCard({ vendors, orders, onSaved }: { vendors: Vendor[]; orders: P
             ))}
           </tbody>
         </table>
+        {!searching && filtered.length > ORDER_PREVIEW && (
+          <button className="btn subtle" style={{ marginTop: 10 }} onClick={() => setShowAll(!showAll)} aria-expanded={showAll}>
+            {showAll ? "Show fewer" : `Show all ${filtered.length}`}
+          </button>
+        )}
+        </>
       )}
       <h3 className="form-title">Add a purchase order</h3>
       <div className="form-grid">
