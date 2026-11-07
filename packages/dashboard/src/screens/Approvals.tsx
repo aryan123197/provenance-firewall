@@ -1,6 +1,6 @@
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef } from "ag-grid-community";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Approval } from "../api";
 import { Card, Empty, ErrorNote, FieldTable } from "../components/ui";
 import { usePoll } from "../hooks";
@@ -29,6 +29,7 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
   const [notices, setNotices] = useState<Notice[]>([]);
   const notify = (ok: boolean, text: string) => setNotices((n) => [{ id: ++noticeSeq, ok, text }, ...n].slice(0, 5));
   const pending = (data ?? []).filter((a) => a.status === "pending");
+  const crowded = pending.length > CROWDED;
   const history = (data ?? []).filter((a) => a.status !== "pending");
 
   const cols = useMemo<ColDef<Approval>[]>(
@@ -74,9 +75,9 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
           <Empty title="Nothing waiting for you">Payments that need a person land here with the evidence to decide.</Empty>
         ) : (
           <div className="inbox">
-            {pending.length > CROWDED && <p className="muted small">{pending.length} payments are waiting. Only the oldest is open; the rest are one line each. Open one to see its evidence and decide.</p>}
+            {crowded && <p className="muted small">{pending.length} payments are waiting, oldest first; the rest are one line each. Open one to see its evidence and decide.</p>}
             {pending.map((a, i) => (
-              <PendingCard key={a.id} a={a} startOpen={pending.length <= CROWDED || i === 0} open={open} notify={notify} onDone={() => { void refresh(); onChange(); }} />
+              <PendingCard key={a.id} a={a} forceOpen={!crowded || i === 0} open={open} notify={notify} onDone={() => { void refresh(); onChange(); }} />
             ))}
           </div>
         )}
@@ -106,8 +107,15 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
 /** Above this many waiting payments the inbox shows one line each, so a long queue stays scannable. */
 const CROWDED = 3;
 
-function PendingCard({ a, startOpen, open, onDone, notify }: { a: Approval; startOpen: boolean; open: (to: string) => void; onDone: () => void; notify: (ok: boolean, text: string) => void }) {
-  const [expanded, setExpanded] = useState(startOpen);
+function PendingCard({ a, forceOpen, open, onDone, notify }: { a: Approval; forceOpen: boolean; open: (to: string) => void; onDone: () => void; notify: (ok: boolean, text: string) => void }) {
+  // The oldest payment (or every payment, in a short queue) is always open; the others open when the operator asks.
+  const [asked, setAsked] = useState(false);
+  const expanded = forceOpen || asked;
+  // Opening replaces the button that was pressed, so move focus to the opened card instead of dropping it on the page.
+  const card = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (asked) card.current?.focus();
+  }, [asked]);
   const [name, setName] = useState(readName);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<"approve" | "reject" | undefined>();
@@ -151,13 +159,13 @@ function PendingCard({ a, startOpen, open, onDone, notify }: { a: Approval; star
           <h3>Pay {amount} to {String(a.intent.payee.value)}</h3>
           <p className="muted small"><strong>{ruleTitle(d.rule)}.</strong> Requested by <code>{a.intent.agentId}</code> · {dateTime(a.requestedAt)}</p>
         </div>
-        <button className="btn" aria-expanded="false" aria-label={`Review: pay ${amount} to ${String(a.intent.payee.value)}`} onClick={() => setExpanded(true)}>Review</button>
+        <button className="btn" aria-label={`Review: pay ${amount} to ${String(a.intent.payee.value)}`} onClick={() => setAsked(true)}>Review</button>
       </article>
     );
   }
 
   return (
-    <article className="pending">
+    <article className="pending" ref={card} tabIndex={-1}>
       <header>
         <div>
           <p className="eyebrow">Requested by <code>{a.intent.agentId}</code> · {dateTime(a.requestedAt)}</p>

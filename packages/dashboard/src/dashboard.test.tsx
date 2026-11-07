@@ -524,6 +524,7 @@ describe("how a sent payment is described", () => {
   test("only a confirmed payout says paid, and a payout PayPal is still processing says so", () => {
     expect(sent("success")).toBe("Paid · PayPal success");
     expect(sent("pending")).toBe("Sent · PayPal pending");
+    expect(sent("unknown")).toBe("Sent · PayPal unknown");
     expect(sent(null)).toBe("Sent to PayPal");
   });
   test("a payout the recipient has not claimed, or that came back or failed, is not called paid", () => {

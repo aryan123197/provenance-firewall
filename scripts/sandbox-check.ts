@@ -40,6 +40,7 @@ try {
     method: "POST",
     headers: { authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`, "content-type": "application/x-www-form-urlencoded" },
     body: "grant_type=client_credentials",
+    signal: AbortSignal.timeout(20_000),
   });
   const body = (await res.json().catch(() => ({}))) as { access_token?: string; scope?: string; error_description?: string };
   if (!res.ok || !body.access_token) throw new Error(`HTTP ${res.status} ${body.error_description ?? ""}`.trim());
@@ -56,11 +57,17 @@ try {
 
 const policy = loadPolicy(readFileSync(new URL("../policies/default.policy.yaml", import.meta.url), "utf8"));
 const authority = new Authority(randomBytes(32));
+/** PayPal requests made through the adapters built by `make`, so a step can prove none were made. */
+let paypalCalls = 0;
+const countingFetch: typeof fetch = (input, init) => {
+  paypalCalls++;
+  return fetch(input, init);
+};
 const make = () => {
   const store = new Store();
   store.upsertVendor({ id: "acme", name: "Acme Supplies", account: receiver, category: "office_supplies" });
   store.addPurchaseOrder({ id: "po_chk", vendorId: "acme", amount: 100, currency: "USD" });
-  const adapter = new PayPalAdapter({ clientId, clientSecret, authority });
+  const adapter = new PayPalAdapter({ clientId, clientSecret, authority, fetch: countingFetch });
   return { adapter, firewall: new Firewall({ store, adapter, authority, policy }) };
 };
 const ctx = new ProvenanceContext();
@@ -76,8 +83,10 @@ const run = Date.now();
 // 2. The attack never reaches PayPal.
 try {
   const { firewall } = make();
+  const before = paypalCalls;
   const r = await firewall.submit({ ...base, idempotencyKey: `chk-attack-${run}`, payee: { handle: "invoice:chk#payee" }, account: { handle: "invoice:chk#payee" }, amount: { handle: "invoice:chk#total" } }, ctx);
-  if (r.status === "denied") pass("2 injected invoice denied", "rule" in r.decision ? r.decision.rule : "denied");
+  if (r.status === "denied" && paypalCalls !== before) fail("2 injected invoice denied", `denied, but ${paypalCalls - before} PayPal request(s) were made first`);
+  else if (r.status === "denied") pass("2 injected invoice denied", `${"rule" in r.decision ? r.decision.rule : "denied"}; no PayPal request made`);
   else fail("2 injected invoice denied", `expected denied, got ${r.status}`);
 } catch (e) {
   fail("2 injected invoice denied", msg(e));
@@ -133,7 +142,7 @@ skip("5b signed event delivery", "needs a public https URL: `pnpm register:webho
 
 // 6. Is Invoicing enabled on this app? (The invoice scripts need it.)
 try {
-  const res = await fetch(`${PAYPAL_SANDBOX_URL}/v2/invoicing/invoices?page=1&page_size=1`, { headers: { authorization: `Bearer ${token}` } });
+  const res = await fetch(`${PAYPAL_SANDBOX_URL}/v2/invoicing/invoices?page=1&page_size=1`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) });
   if (res.ok) pass("6 invoicing enabled", "the Invoicing API answered");
   else if (res.status === 403) skip("6 invoicing", "403 NOT_AUTHORIZED: enable Invoicing on the app (Apps & Credentials, the app, Features), then `pnpm seed:invoices`");
   else fail("6 invoicing", `unexpected HTTP ${res.status}`);

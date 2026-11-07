@@ -102,8 +102,14 @@ export function createApp(deps: AppDeps): FastifyInstance {
     }
   };
 
+  // At most one provider poll per minute, started by a status request and never waited on.
+  let lastPoll = 0;
   app.get("/api/status", async () => {
-    const { store, policy: activePolicy } = deps.runtime();
+    const { store, firewall, policy: activePolicy } = deps.runtime();
+    if (Date.now() - lastPoll > 60_000) {
+      lastPoll = Date.now();
+      void firewall.refreshPayoutStatuses().catch(() => undefined);
+    }
     const policy = activePolicy();
     const audit = store.audit.verifyIncremental();
     return {

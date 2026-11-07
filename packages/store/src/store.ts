@@ -68,7 +68,7 @@ export interface Drift {
   resolvedAt: string | null;
 }
 
-const STATUS_RANK: Record<string, number> = { unknown: 0, pending: 0, unclaimed: 1, success: 2, failed: 2, returned: 3 };
+const STATUS_RANK: Record<string, number> = { unknown: 0, pending: 0, unclaimed: 1, success: 2, failed: 3, returned: 4 };
 
 export class ApprovalStateError extends Error {
   constructor(message: string) {
@@ -660,6 +660,18 @@ export class Store {
       createdAt: r.created_at,
       resolvedAt: r.resolved_at,
     }));
+  }
+
+  /** Sent payouts whose provider status is not yet final (none seen, or pending/unclaimed/unknown), for polling. */
+  payoutsToRefresh(limit = 25): { key: string; reference: string }[] {
+    return this.db
+      .prepare("SELECT idempotency_key AS key, reference FROM executions WHERE state = 'executed' AND reference IS NOT NULL AND (provider_status IS NULL OR provider_status IN ('pending', 'unclaimed', 'unknown')) ORDER BY updated_at DESC LIMIT ?")
+      .all(limit) as { key: string; reference: string }[];
+  }
+
+  /** Records a status read from the provider (the poll's counterpart to a webhook event). Statuses only move forward. */
+  setProviderStatus(key: string, status: string): void {
+    this.applyProviderStatus(key, status);
   }
 
   /** Statuses only move forward: a late "pending" event never undoes a "success". */

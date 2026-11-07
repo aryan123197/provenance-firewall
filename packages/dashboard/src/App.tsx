@@ -15,8 +15,19 @@ const TABS = [
   { to: "/policy", label: "Policy & scorecard" },
 ] as const;
 
+const SEEN_KEY = "pfw.payouts-attention-seen";
+const readSeen = () => {
+  try {
+    return Number(localStorage.getItem(SEEN_KEY) ?? 0);
+  } catch {
+    return 0;
+  }
+};
+
 export function App() {
   const [route, go] = useHashRoute();
+  // "Got it" hides the payout banner at the current count; it returns when the count changes (a new problem, or one resolved).
+  const [seen, setSeen] = useState(readSeen);
   const { data: status, error, refresh } = usePoll(api.status, 3000);
 
   const decisionMatch = /^\/decision\/(.+)$/.exec(route);
@@ -64,10 +75,23 @@ export function App() {
         </div>
       )}
 
-      {status && status.payoutsNeedingAttention > 0 && (
+      {status && status.payoutsNeedingAttention > 0 && status.payoutsNeedingAttention !== seen && (
         <div className="banner warn wide" role="status">
           {status.payoutsNeedingAttention} sent payout{status.payoutsNeedingAttention > 1 ? "s have" : " has"} not arrived as paid: unclaimed by the recipient, returned, or failed at PayPal.{" "}
-          <a href="#/activity">See Live activity</a>
+          <a href="#/activity">See Live activity</a>{" "}
+          <button
+            className="link"
+            onClick={() => {
+              setSeen(status.payoutsNeedingAttention);
+              try {
+                localStorage.setItem(SEEN_KEY, String(status.payoutsNeedingAttention));
+              } catch {
+                /* private mode: hidden until the page reloads */
+              }
+            }}
+          >
+            Got it
+          </button>
         </div>
       )}
 
