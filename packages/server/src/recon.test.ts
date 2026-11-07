@@ -124,3 +124,25 @@ describe("reconciliation API", () => {
     expect(report.items[0]).toMatchObject({ status: "matched", method: "operator" });
   });
 });
+
+describe("reconciliation never takes the status endpoint down", () => {
+  test("a stored line that cannot be reconciled makes reconOpen null, and status still answers", async () => {
+    expect(((await app.inject({ url: "/api/status" })).json() as { reconOpen: number | null }).reconOpen).toBe(0);
+    // Bypass the importer's validation, as a corrupted database or a future bug could.
+    store.db.prepare("INSERT INTO recon_bank_lines (id, line_json, imported_at) VALUES (?, ?, ?)").run("bad", JSON.stringify({ id: "bad", amount: 1, currency: "USD", date: "not a date" }), "2026-11-04T12:00:00.000Z");
+    const r = await app.inject({ url: "/api/status" });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ reconOpen: null, mode: "simulated", audit: { ok: true } });
+  });
+});
+
+describe("confirming a match over the API", () => {
+  test("is refused for a line whose problem a confirmation cannot clear", async () => {
+    await post("/api/recon/bank-lines", { importedBy: "ops", lines: [line({ receiver: "attacker@evil.example" })] });
+    const r = await post("/api/recon/matches", { bankLineId: "bl1", ledgerKey: "k1", resolvedBy: "ops@co" });
+    expect(r.statusCode).toBe(409);
+    expect((r.json() as { error: string }).error).toMatch(/cannot be cleared by confirming/);
+    const audit = (await app.inject({ url: "/api/audit?limit=500" })).json() as { entries: { type: string }[] };
+    expect(audit.entries.some((e) => e.type === "recon_match_confirmed")).toBe(false);
+  });
+});

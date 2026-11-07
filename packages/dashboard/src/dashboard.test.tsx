@@ -578,7 +578,35 @@ describe("close and reconciliation screen", () => {
     await user.paste('[{"id":"b1","amount":100,"currency":"USD","date":"2026-11-03T00:00:00Z"}]');
     await user.click(screen.getByRole("button", { name: "Import" }));
     await screen.findByText(/Imported 1 new line/);
+    // One notice, not a second generic one on top.
+    expect(screen.getAllByRole("listitem").filter((li) => /import/i.test(li.textContent ?? ""))).toHaveLength(1);
+    expect(screen.queryByText("Settlement lines imported.")).toBeNull();
     expect(calls.find((c) => c.path === "/api/recon/bank-lines")!.body).toEqual({ lines: [{ id: "b1", amount: 100, currency: "USD", date: "2026-11-03T00:00:00Z" }], importedBy: "ops@co" });
+  });
+
+  test("a note written on one adjustment is never sent with another", async () => {
+    const adj = (id: string, amount: number) => ({ id, itemId: `rc_${id}`, kind: "fee", amount, currency: "USD", evidence: { bankLineId: `b_${id}`, ledgerKey: `k_${id}`, bankAmount: 45_000, ledgerAmount: 45_000, fee: amount }, status: "proposed", proposedAt: "2026-11-03T10:00:00Z", resolvedBy: null, resolvedAt: null, note: null });
+    const calls = mockApi({
+      "GET /api/recon": { body: view({ report: { items: [], totals: [] }, adjustments: [adj("a1", 25), adj("a2", 50)] }) },
+      "POST /api/recon/adjustments/a1/approve": { body: { ...adj("a1", 25), status: "approved" } },
+      "POST /api/recon/adjustments/a2/approve": { body: { ...adj("a2", 50), status: "approved" } },
+    });
+    const user = userEvent.setup();
+    await renderRecon();
+    await screen.findByText("PayPal fee $0.25");
+    await user.type(screen.getByPlaceholderText("you@company.example"), "cfo@co");
+    const notes = screen.getAllByPlaceholderText(/checked against the PayPal statement/);
+    expect(notes).toHaveLength(2);
+    await user.type(notes[0]!, "note for the $0.25 fee only");
+    await user.click(screen.getByRole("button", { name: "Approve $0.50" }));
+    await screen.findByText("Adjustment approved.");
+    expect(calls.find((c) => c.path === "/api/recon/adjustments/a2/approve")!.body).toEqual({ approver: "cfo@co" });
+  });
+
+  test("the confirmable reasons in the screen are the ones the server enforces", async () => {
+    const { CONFIRMABLE } = await import("./screens/Recon");
+    const { CONFIRMABLE_REASONS } = await import("@pfw/recon");
+    expect([...CONFIRMABLE].sort()).toEqual([...CONFIRMABLE_REASONS].sort());
   });
 
   test("with nothing imported it says what to do", async () => {

@@ -40,7 +40,7 @@ export function App() {
             <a key={t.to} href={`#${t.to}`} aria-current={active === t.to ? "page" : undefined}>
               {t.label}
               {t.to === "/approvals" && status && status.pendingApprovals > 0 && <span className="badge">{status.pendingApprovals}</span>}
-              {t.to === "/recon" && status && status.reconOpen > 0 && <span className="badge">{status.reconOpen}</span>}
+              {t.to === "/recon" && status && status.reconOpen !== null && status.reconOpen > 0 && <span className="badge">{status.reconOpen}</span>}
             </a>
           ))}
         </nav>

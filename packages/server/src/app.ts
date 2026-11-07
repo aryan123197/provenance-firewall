@@ -103,10 +103,15 @@ export function createApp(deps: AppDeps): FastifyInstance {
     }
   };
 
-  // Bank lines that still need a person, plus adjustments waiting for approval.
-  const reconOpen = () => {
-    const recon = reconOf();
-    return recon.report().items.filter((i) => i.bankLineId !== null && i.status !== "matched").length + recon.adjustments("proposed").length;
+  // Bank lines that still need a person, plus adjustments waiting for approval. Reconciliation is not on the payment path,
+  // so if it cannot be computed the status still answers, with null.
+  const reconOpen = (): number | null => {
+    try {
+      const recon = reconOf();
+      return recon.report().items.filter((i) => i.bankLineId !== null && i.status !== "matched").length + recon.adjustments("proposed").length;
+    } catch {
+      return null;
+    }
   };
 
   app.get("/api/status", async () => {

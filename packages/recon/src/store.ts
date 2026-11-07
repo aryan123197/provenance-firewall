@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Store } from "@pfw/store";
 import { proposeAdjustments, reconcile } from "./match";
 import {
+  CONFIRMABLE_REASONS,
   DEFAULT_CONFIG,
   ReconInputError,
   type AdjustmentKind,
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS recon_adjustments (
   resolved_at   TEXT,
   note          TEXT
 );
+CREATE INDEX IF NOT EXISTS audit_log_type ON audit_log(type);
 CREATE TRIGGER IF NOT EXISTS recon_bank_lines_no_update BEFORE UPDATE ON recon_bank_lines
 BEGIN SELECT RAISE(ABORT, 'bank lines are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS recon_bank_lines_no_delete BEFORE DELETE ON recon_bank_lines
@@ -168,17 +170,21 @@ export class ReconStore {
 
   /** Payments the firewall allowed and the adapter executed. A failed execution is not in the ledger: no money moved. */
   ledger(): LedgerEntry[] {
-    const rows = this.store.db
-      .prepare(
-        `SELECT p.idempotency_key AS key, p.vendor_id, p.created_at, e.reference, e.request_id, d.decision_json,
-                (SELECT json_extract(a.payload_json, '$.purchaseOrderId') FROM audit_log a
-                  WHERE a.type = 'purchase_order_closed' AND json_extract(a.payload_json, '$.idempotencyKey') = p.idempotency_key LIMIT 1) AS po_id
-           FROM payments p
-           JOIN executions e ON e.idempotency_key = p.idempotency_key AND e.state = 'executed'
-           JOIN decisions d ON d.idempotency_key = p.idempotency_key
-          ORDER BY p.idempotency_key`,
-      )
-      .all() as { key: string; vendor_id: string | null; created_at: string; reference: string | null; request_id: string | null; decision_json: string; po_id: string | null }[];
+    // One pass over the purchase-order closes (indexed by type), not a scan of the audit log per payment.
+    const poFor = new Map(
+      (this.store.db.prepare("SELECT json_extract(payload_json, '$.idempotencyKey') AS key, json_extract(payload_json, '$.purchaseOrderId') AS po FROM audit_log WHERE type = 'purchase_order_closed'").all() as { key: string; po: string }[]).map((r) => [r.key, r.po]),
+    );
+    const rows = (
+      this.store.db
+        .prepare(
+          `SELECT p.idempotency_key AS key, p.vendor_id, p.created_at, e.reference, e.request_id, d.decision_json
+             FROM payments p
+             JOIN executions e ON e.idempotency_key = p.idempotency_key AND e.state = 'executed'
+             JOIN decisions d ON d.idempotency_key = p.idempotency_key
+            ORDER BY p.idempotency_key`,
+        )
+        .all() as { key: string; vendor_id: string | null; created_at: string; reference: string | null; request_id: string | null; decision_json: string }[]
+    ).map((r) => ({ ...r, po_id: poFor.get(r.key) ?? null }));
     return rows.map((r) => {
       const f = (JSON.parse(r.decision_json) as { fields: Record<"payee" | "account" | "amount" | "currency", { value: string | number }> }).fields;
       return {
@@ -238,8 +244,8 @@ export class ReconStore {
         const item = report.items.find((i) => i.bankLineId === input.bankLineId);
         if (!item) throw new ReconStateError("unknown bank line");
         if (item.status === "matched") throw new ReconStateError("this bank line is already matched");
+        if (!CONFIRMABLE_REASONS.includes(item.reason)) throw new ReconStateError("this line cannot be cleared by confirming a match; investigate it in PayPal or approve its adjustment");
         const open = new Set([...item.candidates, ...report.items.filter((i) => i.reason === "not_settled").map((i) => i.ledgerKey)]);
-        if (item.ledgerKey && item.reason !== "competing_bank_lines") open.add(item.ledgerKey);
         if (!open.has(input.ledgerKey)) throw new ReconStateError("that payment is not an open candidate for this bank line");
         this.store.db.prepare("INSERT INTO recon_resolutions (bank_line_id, ledger_key, resolved_by, note, resolved_at) VALUES (?, ?, ?, ?, ?)").run(input.bankLineId, input.ledgerKey, by, note, this.clock().toISOString());
         this.store.audit.append("recon_match_confirmed", { bankLineId: input.bankLineId, ledgerKey: input.ledgerKey, resolvedBy: by, note });

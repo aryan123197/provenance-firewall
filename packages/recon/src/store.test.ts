@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { loadPolicy, tag, type OriginKind, type ResolvedIntent } from "@pfw/core";
 import { Store } from "@pfw/store";
 import { ReconStore, ReconStateError } from "./store";
@@ -234,5 +234,56 @@ describe("operator confirmation", () => {
     recon.importBankLines([line("x", { reference: "WRONG-REF" })], "ops");
     recon.resolveMatch({ bankLineId: "x", ledgerKey: "a", resolvedBy: "ops" });
     expect(recon.report().items.find((i) => i.bankLineId === "x")?.status).toBe("matched");
+  });
+});
+
+describe("confirming is only for problems a person can settle by naming a payment", () => {
+  const confirmErr = (bankLineId: string, ledgerKey: string) => {
+    try {
+      recon.resolveMatch({ bankLineId, ledgerKey, resolvedBy: "ops@co" });
+      return null;
+    } catch (e) {
+      return (e as Error).message;
+    }
+  };
+
+  test.each([
+    ["receiver_mismatch", { receiver: "attacker@evil.example" }],
+    ["amount_difference", { amount: 4490 }],
+    ["currency_mismatch", { currency: "EUR" }],
+  ])("a %s line is refused, writes nothing, and leaves the line free for a later correct decision", (reason, override) => {
+    pay("a");
+    recon.importBankLines([line("x", { reference: "PP-a", ...override })], "ops");
+    expect(recon.report().items[0]?.reason).toBe(reason);
+    const before = store.audit.entries().length;
+    expect(confirmErr("x", "a")).toMatch(/cannot be cleared by confirming/);
+    expect(store.audit.entries()).toHaveLength(before);
+    expect(store.db.prepare("SELECT COUNT(*) AS n FROM recon_resolutions").get()).toEqual({ n: 0 });
+  });
+
+  test("the reasons a person can clear are exactly the ones the matcher reports for open candidates", () => {
+    pay("a");
+    pay("b");
+    recon.importBankLines([line("x", { reference: undefined })], "ops");
+    expect(recon.report().items.find((i) => i.bankLineId === "x")?.reason).toBe("several_candidates");
+    expect(confirmErr("x", "a")).toBeNull();
+  });
+});
+
+describe("the ledger", () => {
+  test("reads the audit log once, not once per payment, and has an index to do it with", () => {
+    for (let n = 0; n < 5; n++) {
+      store.addPurchaseOrder({ id: `po${n}`, vendorId: "acme", amount: 100 + n, currency: "USD" });
+      pay(`p${n}`, 100 + n, `PP-p${n}`, `po${n}`);
+    }
+    const prepare = vi.spyOn(store.db, "prepare");
+    const ledger = recon.ledger();
+    const auditSql = prepare.mock.calls.map(([sql]) => String(sql)).filter((sql) => sql.includes("audit_log"));
+    prepare.mockRestore();
+    expect(ledger.map((l) => l.poId)).toEqual(["po0", "po1", "po2", "po3", "po4"]);
+    expect(auditSql).toHaveLength(1);
+    // A subquery correlated with each payment would scan the audit log once per payment.
+    expect(auditSql[0]).not.toMatch(/=\s*p\.idempotency_key/);
+    expect(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'audit_log_type'").get()).toBeTruthy();
   });
 });

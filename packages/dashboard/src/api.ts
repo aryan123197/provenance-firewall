@@ -18,7 +18,8 @@ export interface Status {
   audit: { ok: true; count: number; head: { seq: number; hash: string } | null } | { ok: false; seq: number; reason: string };
   driftOpen: number;
   pendingApprovals: number;
-  reconOpen: number;
+  /** Null when reconciliation could not be computed. */
+  reconOpen: number | null;
 }
 
 export interface Vendor {

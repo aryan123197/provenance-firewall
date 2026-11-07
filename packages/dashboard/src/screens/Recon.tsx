@@ -16,8 +16,8 @@ const readName = () => {
   }
 };
 
-/** A person can settle these by naming the payment. The others (amount, receiver, currency, purchase order) cannot be cleared that way. */
-const CONFIRMABLE = new Set(["reference_unknown", "no_candidate", "several_candidates", "competing_bank_lines"]);
+/** A person can settle these by naming the payment. The others (amount, receiver, currency, purchase order) cannot be cleared that way. Must equal CONFIRMABLE_REASONS in @pfw/recon (a test checks it). */
+export const CONFIRMABLE = new Set(["reference_unknown", "no_candidate", "several_candidates", "competing_bank_lines"]);
 
 interface Notice {
   id: number;
@@ -29,7 +29,6 @@ let noticeSeq = 0;
 export function Recon({ onChange }: { onChange: () => void }) {
   const { data, error, refresh } = usePoll(api.recon, 3000);
   const [name, setName] = useState(readName);
-  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [importing, setImporting] = useState(false);
@@ -41,8 +40,8 @@ export function Recon({ onChange }: { onChange: () => void }) {
     onChange();
   };
 
-  /** Runs one operator action: needs a name, shows the server's reason on failure, clears the note on success. */
-  const act = async (okText: string, fn: (who: string) => Promise<unknown>) => {
+  /** Runs one operator action: needs a name, shows the server's reason on failure, and reports success once. */
+  const act = async <T,>(okText: string | ((result: T) => string), fn: (who: string) => Promise<T>) => {
     const who = name.trim();
     if (!who) {
       notify(false, "Enter your name so this is attributed to you.");
@@ -55,9 +54,8 @@ export function Recon({ onChange }: { onChange: () => void }) {
     }
     setBusy(true);
     try {
-      await fn(who);
-      notify(true, okText);
-      setNote("");
+      const result = await fn(who);
+      notify(true, typeof okText === "function" ? okText(result) : okText);
       done();
       return true;
     } catch (e) {
@@ -79,19 +77,22 @@ export function Recon({ onChange }: { onChange: () => void }) {
   const resolved = (view?.adjustments ?? []).filter((a) => a.status !== "proposed");
 
   const submitImport = () =>
-    act("Settlement lines imported.", async (who) => {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(json);
-      } catch {
-        throw new Error("That is not valid JSON. Paste an array of settlement lines.");
-      }
-      const lines = Array.isArray(parsed) ? parsed : (parsed as { lines?: unknown })?.lines;
-      const r = await api.reconImport(lines, who);
-      setJson("");
-      setImporting(false);
-      notify(true, `Imported ${r.added} new line${r.added === 1 ? "" : "s"}${r.unchanged ? `, ${r.unchanged} already known` : ""}. Run reconciliation to match them.`);
-    });
+    act(
+      (r: { added: number; unchanged: number }) => `Imported ${r.added} new line${r.added === 1 ? "" : "s"}${r.unchanged ? `, ${r.unchanged} already known` : ""}. Run reconciliation to match them.`,
+      async (who) => {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(json);
+        } catch {
+          throw new Error("That is not valid JSON. Paste an array of settlement lines.");
+        }
+        const lines = Array.isArray(parsed) ? parsed : (parsed as { lines?: unknown })?.lines;
+        const r = await api.reconImport(lines, who);
+        setJson("");
+        setImporting(false);
+        return r;
+      },
+    );
 
   return (
     <div className="stack">
@@ -112,10 +113,6 @@ export function Recon({ onChange }: { onChange: () => void }) {
           <label className="field grow">
             <span>Your name</span>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="you@company.example" autoComplete="name" />
-          </label>
-          <label className="field grow">
-            <span>Note for the next action (optional)</span>
-            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. checked against the PayPal statement" />
           </label>
           <div className="buttons">
             <button className="btn" onClick={() => setImporting((v) => !v)} aria-expanded={importing}>Import settlement lines</button>
@@ -141,7 +138,7 @@ export function Recon({ onChange }: { onChange: () => void }) {
         ) : (
           <div className="inbox">
             {queue.map((i) => (
-              <QueueItem key={i.id} item={i} bank={bank.get(i.bankLineId!)} ledger={ledger} unsettled={unsettled} busy={busy} onConfirm={(key) => act("Match confirmed and recorded.", (who) => api.reconConfirm(i.bankLineId!, key, who, note))} />
+              <QueueItem key={i.id} item={i} bank={bank.get(i.bankLineId!)} ledger={ledger} unsettled={unsettled} busy={busy} onConfirm={(key, note) => act("Match confirmed and recorded.", (who) => api.reconConfirm(i.bankLineId!, key, who, note))} />
             ))}
           </div>
         )}
@@ -153,7 +150,7 @@ export function Recon({ onChange }: { onChange: () => void }) {
         ) : (
           <div className="inbox">
             {waiting.map((a) => (
-              <AdjustmentCard key={a.id} a={a} busy={busy} onResolve={(approve) => act(approve ? "Adjustment approved." : "Adjustment rejected.", (who) => api.reconAdjustment(a.id, approve, who, note))} />
+              <AdjustmentCard key={a.id} a={a} busy={busy} onResolve={(approve, note) => act(approve ? "Adjustment approved." : "Adjustment rejected.", (who) => api.reconAdjustment(a.id, approve, who, note))} />
             ))}
           </div>
         )}
@@ -206,12 +203,23 @@ function Totals({ view }: { view: ReconView | undefined }) {
   );
 }
 
+/** A note belongs to the one card it is written on, so it can never ride along with a different action. */
+function NoteField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="field" style={{ marginTop: 12 }}>
+      <span>Note for this action (optional)</span>
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="e.g. checked against the PayPal statement" />
+    </label>
+  );
+}
+
 const paymentLabel = (l: LedgerEntry) => `${l.payee} · ${money(l.amount, l.currency)} · ${l.receiver} · ${dateTime(l.date)}`;
 
-function QueueItem({ item, bank, ledger, unsettled, busy, onConfirm }: { item: ReconItem; bank: BankLine | undefined; ledger: Map<string, LedgerEntry>; unsettled: ReconItem[]; busy: boolean; onConfirm: (ledgerKey: string) => void }) {
+function QueueItem({ item, bank, ledger, unsettled, busy, onConfirm }: { item: ReconItem; bank: BankLine | undefined; ledger: Map<string, LedgerEntry>; unsettled: ReconItem[]; busy: boolean; onConfirm: (ledgerKey: string, note: string) => void }) {
   const confirmable = CONFIRMABLE.has(item.reason);
   const offered = [...new Set([...item.candidates, ...unsettled.map((u) => u.ledgerKey!)])].filter((k) => ledger.has(k));
   const paired = item.ledgerKey ? ledger.get(item.ledgerKey) : undefined;
+  const [note, setNote] = useState("");
   return (
     <article className="qitem">
       <header>
@@ -245,11 +253,12 @@ function QueueItem({ item, bank, ledger, unsettled, busy, onConfirm }: { item: R
             <p className="muted small" style={{ marginTop: 12 }}>
               {item.reason === "reference_unknown" ? "This line has a reference we do not recognise. Only confirm a match if you have checked it elsewhere." : "If you are sure, confirm which payment this line is:"}
             </p>
+            <NoteField value={note} onChange={setNote} />
             <ul className="cands">
               {offered.map((k) => (
                 <li key={k}>
                   <span>{paymentLabel(ledger.get(k)!)}</span>
-                  <button className="btn" disabled={busy} onClick={() => onConfirm(k)} aria-label={`This line is the payment to ${ledger.get(k)!.payee} for ${money(ledger.get(k)!.amount, ledger.get(k)!.currency)}`}>This is it</button>
+                  <button className="btn" disabled={busy} onClick={() => onConfirm(k, note)} aria-label={`This line is the payment to ${ledger.get(k)!.payee} for ${money(ledger.get(k)!.amount, ledger.get(k)!.currency)}`}>This is it</button>
                 </li>
               ))}
             </ul>
@@ -266,8 +275,9 @@ function QueueItem({ item, bank, ledger, unsettled, busy, onConfirm }: { item: R
 
 const adjustmentTitle = (a: AdjustmentRecord) => (a.kind === "fee" ? "PayPal fee" : a.amount < 0 ? "Settled short by" : "Settled over by");
 
-function AdjustmentCard({ a, busy, onResolve }: { a: AdjustmentRecord; busy: boolean; onResolve: (approve: boolean) => void }) {
+function AdjustmentCard({ a, busy, onResolve }: { a: AdjustmentRecord; busy: boolean; onResolve: (approve: boolean, note: string) => void }) {
   const e = a.evidence;
+  const [note, setNote] = useState("");
   return (
     <article className="qitem adj">
       <header>
@@ -276,8 +286,8 @@ function AdjustmentCard({ a, busy, onResolve }: { a: AdjustmentRecord; busy: boo
           <h3>{adjustmentTitle(a)} {money(Math.abs(a.amount), a.currency)}</h3>
         </div>
         <div className="buttons">
-          <button className="btn danger" disabled={busy} onClick={() => onResolve(false)}>Reject</button>
-          <button className="btn primary" disabled={busy} onClick={() => onResolve(true)}>Approve {money(Math.abs(a.amount), a.currency)}</button>
+          <button className="btn danger" disabled={busy} onClick={() => onResolve(false, note)}>Reject</button>
+          <button className="btn primary" disabled={busy} onClick={() => onResolve(true, note)}>Approve {money(Math.abs(a.amount), a.currency)}</button>
         </div>
       </header>
       <dl className="qmeta">
@@ -285,6 +295,7 @@ function AdjustmentCard({ a, busy, onResolve }: { a: AdjustmentRecord; busy: boo
         <dd>Line <code>{e.bankLineId}</code> settled {money(e.bankAmount, a.currency)}; payment <code>{e.ledgerKey}</code> authorized {money(e.ledgerAmount, a.currency)}{e.fee > 0 ? `; fee ${money(e.fee, a.currency)}` : ""}.</dd>
         <dt>Proposed</dt><dd>{dateTime(a.proposedAt)}</dd>
       </dl>
+      <NoteField value={note} onChange={setNote} />
     </article>
   );
 }
