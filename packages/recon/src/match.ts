@@ -108,6 +108,11 @@ export function reconcile(input: ReconInput): ReconReport {
     const diff = b.amount - l.amount;
     if (b.currency !== l.currency) return make(b, l, "ambiguous", method, "currency_mismatch", `Bank line is in ${b.currency} but the payment was authorized in ${l.currency}.`);
     if (b.receiver !== undefined && b.receiver !== l.receiver) return make(b, l, "ambiguous", method, "receiver_mismatch", "The money went to a different account than the one authorized.");
+    // Without a receiver the payee cannot be checked, so nothing is matched on its own. A person who has looked at the
+    // account can confirm it (that is what "operator" means); the line is simply not allowed to settle itself.
+    if (b.receiver === undefined && method !== "operator") {
+      return make(b, l, "ambiguous", method, "receiver_unverified", "The bank line does not say who was paid, so the payee could not be checked against the authorized account.", [l.key]);
+    }
     if (diff !== 0) {
       if (approved.has(`${itemId(b.id, l.key)}|${diff}`)) {
         return make(b, l, "matched", method, method === "operator" ? "operator_confirmed" : "single_reference_match", `Matched; the ${money(diff, b.currency)} difference is covered by an approved adjustment.`);

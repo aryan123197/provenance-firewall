@@ -78,6 +78,7 @@ export type ReasonCode =
   | "amount_difference"
   | "currency_mismatch"
   | "receiver_mismatch"
+  | "receiver_unverified"
   | "not_settled"
   | "invoice_ambiguous"
   | "invoice_mismatch";
@@ -86,7 +87,7 @@ export type ReasonCode =
  * Reasons a person can settle by naming the payment. Anything else (a different receiver or currency, an amount
  * difference, a purchase-order problem) is not cleared by confirming a pairing: confirming would be recorded and have no effect.
  */
-export const CONFIRMABLE_REASONS: readonly ReasonCode[] = ["reference_unknown", "no_candidate", "several_candidates", "competing_bank_lines"];
+export const CONFIRMABLE_REASONS: readonly ReasonCode[] = ["reference_unknown", "no_candidate", "several_candidates", "competing_bank_lines", "receiver_unverified"];
 
 export interface InvoiceLink {
   status: "linked" | "none" | "ambiguous" | "mismatch";

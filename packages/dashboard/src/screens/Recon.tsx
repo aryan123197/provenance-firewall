@@ -17,7 +17,7 @@ const readName = () => {
 };
 
 /** A person can settle these by naming the payment. The others (amount, receiver, currency, purchase order) cannot be cleared that way. Must equal CONFIRMABLE_REASONS in @pfw/recon (a test checks it). */
-export const CONFIRMABLE = new Set(["reference_unknown", "no_candidate", "several_candidates", "competing_bank_lines"]);
+export const CONFIRMABLE = new Set(["reference_unknown", "no_candidate", "several_candidates", "competing_bank_lines", "receiver_unverified"]);
 
 interface Notice {
   id: number;
@@ -160,6 +160,14 @@ export function Recon({ onChange }: { onChange: () => void }) {
               <li key={a.id}>
                 <span className={`status-chip ${a.status === "approved" ? "ok" : "bad"}`}>{a.status === "approved" ? "Approved" : "Rejected"}</span>{" "}
                 {adjustmentTitle(a)} {money(Math.abs(a.amount), a.currency)} · {a.resolvedBy} · {a.resolvedAt ? dateTime(a.resolvedAt) : ""}
+                {a.status === "rejected" && (
+                  <>
+                    {" "}
+                    <button type="button" className="link" disabled={busy} onClick={() => void act("Adjustment reopened: it is waiting for approval again.", (who) => api.reconReopen(a.id, who))} aria-label={`Reopen the rejected ${adjustmentTitle(a).toLowerCase()} ${money(Math.abs(a.amount), a.currency)}`}>
+                      Reopen
+                    </button>
+                  </>
+                )}
               </li>
             ))}
           </ul>

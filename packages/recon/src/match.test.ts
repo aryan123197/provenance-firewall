@@ -36,6 +36,21 @@ describe("matching by reference", () => {
     expect(item(r, "b1")).toMatchObject({ status: "ambiguous", reason: "receiver_mismatch" });
   });
 
+  it("will not match a line that has no receiver: the payee cannot be checked, so a person decides", () => {
+    const { receiver: _r, ...noReceiver } = bk({ id: "b1", reference: "R" });
+    const r = run([noReceiver], [led({ key: "k1", reference: "R" })]);
+    expect(item(r, "b1")).toMatchObject({ status: "ambiguous", reason: "receiver_unverified", ledgerKey: "k1", candidates: ["k1"] });
+    expect(item(r, "b1").explanation).not.toMatch(/receiver\.$/); // it must not claim the receiver was checked
+  });
+
+  it("a person's confirmation settles a line with no receiver (they checked the account), but still not a different one", () => {
+    const { receiver: _r, ...noReceiver } = bk({ id: "b1", reference: "R" });
+    const ok = run([noReceiver], [led({ key: "k1", reference: "R" })], [], { resolutions: [{ bankLineId: "b1", ledgerKey: "k1" }] });
+    expect(item(ok, "b1")).toMatchObject({ status: "matched", method: "operator", reason: "operator_confirmed" });
+    const wrong = run([bk({ id: "b1", reference: "R", receiver: "x@evil.example" })], [led({ key: "k1", reference: "R" })], [], { resolutions: [{ bankLineId: "b1", ledgerKey: "k1" }] });
+    expect(item(wrong, "b1")).toMatchObject({ status: "ambiguous", reason: "receiver_mismatch" });
+  });
+
   it("flags a currency mismatch even when the numbers agree", () => {
     const r = run([bk({ id: "b1", reference: "R", currency: "EUR" })], [led({ key: "k1", reference: "R" })]);
     expect(item(r, "b1")).toMatchObject({ status: "ambiguous", reason: "currency_mismatch" });
@@ -262,7 +277,8 @@ describe("invariants", () => {
           const bl = bank.find((x) => x.id === m.bankLineId)!;
           const le = ledger.find((x) => x.key === m.ledgerKey)!;
           expect([bl.amount, bl.currency]).toEqual([le.amount, le.currency]);
-          if (bl.receiver) expect(bl.receiver).toBe(le.receiver);
+          // Nothing is matched automatically unless the bank line names the receiver and it is the authorized one.
+          expect(bl.receiver).toBe(le.receiver);
         }
       }),
     );

@@ -196,6 +196,7 @@ export const api = {
     post<{ ok: true }>("/api/recon/matches", { bankLineId, ledgerKey, resolvedBy, note: note || undefined }),
   reconAdjustment: (id: string, approve: boolean, approver: string, note: string) =>
     post<AdjustmentRecord>(`/api/recon/adjustments/${encodeURIComponent(id)}/${approve ? "approve" : "reject"}`, { approver, note: note || undefined }),
+  reconReopen: (id: string, reopenedBy: string) => post<AdjustmentRecord>(`/api/recon/adjustments/${encodeURIComponent(id)}/reopen`, { reopenedBy }),
   drift: () => request<{ drift: Drift[] }>("/api/drift").then((r) => r.drift),
   policy: () => request<PolicyView>("/api/policy"),
   compilePolicy: (english: string) => post<CompileResult>("/api/policy/compile", { english }),

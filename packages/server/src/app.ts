@@ -258,6 +258,13 @@ export function createApp(deps: AppDeps): FastifyInstance {
     };
   app.post<{ Params: { id: string }; Body: { approver?: string; note?: string } }>("/api/recon/adjustments/:id/approve", { preHandler: requireOperator }, resolveAdjustment(true));
   app.post<{ Params: { id: string }; Body: { approver?: string; note?: string } }>("/api/recon/adjustments/:id/reject", { preHandler: requireOperator }, resolveAdjustment(false));
+  app.post<{ Params: { id: string }; Body: { reopenedBy?: string } }>("/api/recon/adjustments/:id/reopen", { preHandler: requireOperator }, async (req, reply) => {
+    try {
+      return reconOf().reopenAdjustment(req.params.id, { reopenedBy: String(req.body?.reopenedBy ?? "") });
+    } catch (e) {
+      return reconErrors(reply, e);
+    }
+  });
 
   app.get("/api/drift", async () => ({ drift: deps.runtime().store.listDrift() }));
 

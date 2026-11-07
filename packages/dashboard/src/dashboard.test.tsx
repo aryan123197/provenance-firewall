@@ -653,6 +653,38 @@ describe("close and reconciliation screen", () => {
     expect([...CONFIRMABLE].sort()).toEqual([...CONFIRMABLE_REASONS].sort());
   });
 
+  test("a rejected adjustment can be reopened by a named person; an approved one cannot", async () => {
+    const adj = (id: string, status: string) => ({ id, itemId: `rc_${id}`, kind: "difference", amount: -10, currency: "USD", evidence: { bankLineId: `b_${id}`, ledgerKey: `k_${id}`, bankAmount: 4490, ledgerAmount: 4500, fee: 0 }, status, proposedAt: "2026-11-03T10:00:00Z", resolvedBy: "cfo@co", resolvedAt: "2026-11-03T11:00:00Z", note: null });
+    const calls = mockApi({
+      "GET /api/recon": { body: view({ report: { items: [], totals: [] }, adjustments: [adj("r1", "rejected"), adj("a1", "approved")] }) },
+      "POST /api/recon/adjustments/r1/reopen": { body: { ...adj("r1~1", "proposed"), resolvedBy: null, resolvedAt: null } },
+    });
+    const user = userEvent.setup();
+    await renderRecon();
+    await screen.findByRole("button", { name: /Reopen the rejected/ });
+    expect(screen.getAllByRole("button", { name: /Reopen/ })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: /Reopen the rejected/ }));
+    await screen.findByText(/Enter your name so this is attributed to you/);
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await user.type(screen.getByPlaceholderText("you@company.example"), "cfo@company.example");
+    await user.click(screen.getByRole("button", { name: /Reopen the rejected/ }));
+    await screen.findByText(/Adjustment reopened/);
+    expect(calls.find((c) => c.path === "/api/recon/adjustments/r1/reopen")!.body).toEqual({ reopenedBy: "cfo@company.example" });
+  });
+
+  test("a line that does not say who was paid can be confirmed by a person", async () => {
+    mockApi({
+      "GET /api/recon": {
+        body: view({
+          report: { items: [item({ reason: "receiver_unverified", ledgerKey: "k1", candidates: ["k1"], explanation: "The bank line does not say who was paid, so the payee could not be checked against the authorized account." })], totals: [] },
+        }),
+      },
+    });
+    await renderRecon();
+    await screen.findByText("Line does not say who was paid");
+    expect(screen.getByRole("button", { name: /^This is it: the payment to Acme Supplies/ })).toBeTruthy();
+  });
+
   test("with nothing imported it says what to do", async () => {
     mockApi({ "GET /api/recon": { body: view({ report: { items: [], totals: [] }, bank: [], ledger: [] }) } });
     await renderRecon();

@@ -273,7 +273,7 @@ export class ReconStore {
         const at = this.clock().toISOString();
         if (input.approve) {
           if (Math.abs(row.amount) > this.config.maxAdjustment) throw new ReconStateError("this adjustment is above the ceiling; investigate it instead");
-          const still = proposeAdjustments(this.report(), this.config).some((a) => a.id === id);
+          const still = this.stillApplies(row);
           if (!still) throw new ReconStateError("this adjustment no longer applies to the current books");
         }
         this.store.db.prepare("UPDATE recon_adjustments SET status = ?, resolved_by = ?, resolved_at = ?, note = ? WHERE id = ?").run(input.approve ? "approved" : "rejected", by, at, note, id);
@@ -290,6 +290,44 @@ export class ReconStore {
         return toRecord(this.store.db.prepare("SELECT * FROM recon_adjustments WHERE id = ?").get(id) as AdjRow);
       })
       .immediate();
+  }
+
+  /**
+   * Gives a rejected adjustment a second proposal. The rejection stays as it was (resolved once, audited); this adds a new
+   * row that goes through the normal approval. Nothing reopens on its own, so a rejection is not nagged about after every run.
+   */
+  reopenAdjustment(id: string, input: { reopenedBy: string }): AdjustmentRecord {
+    const by = this.person(input.reopenedBy, "reopenedBy");
+    return this.store.db
+      .transaction(() => {
+        const row = this.store.db.prepare("SELECT * FROM recon_adjustments WHERE id = ?").get(id) as AdjRow | undefined;
+        if (!row) throw new ReconStateError("unknown adjustment");
+        if (row.status !== "rejected") throw new ReconStateError(`only a rejected adjustment can be reopened (this one is ${row.status})`);
+        const same = this.store.db.prepare("SELECT id, status FROM recon_adjustments WHERE item_id = ? AND kind = ? AND amount = ? ORDER BY proposed_at, id").all(row.item_id, row.kind, row.amount) as { id: string; status: string }[];
+        if (same.some((a) => a.status === "proposed" || a.status === "approved")) throw new ReconStateError("this adjustment is already waiting or approved");
+        if (!this.stillApplies(row)) throw new ReconStateError("this adjustment no longer applies to the current books");
+        const newId = `${row.id.split("~")[0]}~${same.length}`;
+        this.store.db
+          .prepare("INSERT INTO recon_adjustments (id, item_id, kind, amount, currency, evidence_json, proposed_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+          .run(newId, row.item_id, row.kind, row.amount, row.currency, row.evidence_json, this.clock().toISOString());
+        this.store.audit.append("recon_adjustment_reopened", {
+          adjustmentId: newId,
+          reopenedFrom: id,
+          itemId: row.item_id,
+          kind: row.kind,
+          amount: row.amount,
+          currency: row.currency,
+          evidence: JSON.parse(row.evidence_json) as unknown,
+          reopenedBy: by,
+        });
+        return toRecord(this.store.db.prepare("SELECT * FROM recon_adjustments WHERE id = ?").get(newId) as AdjRow);
+      })
+      .immediate();
+  }
+
+  /** Whether the matcher would propose this same adjustment (same item, kind and amount) on the books as they are now. */
+  private stillApplies(row: AdjRow): boolean {
+    return proposeAdjustments(this.report(), this.config).some((a) => a.itemId === row.item_id && a.kind === row.kind && a.amount === row.amount);
   }
 
   private person(v: string, field: string): string {

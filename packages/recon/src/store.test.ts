@@ -311,3 +311,90 @@ describe("a payment the firewall allowed within its purchase-order tolerance", (
     expect(recon.report().items.find((i) => i.bankLineId === "u")?.status).toBe("matched");
   });
 });
+
+describe("a bank line that does not say who was paid", () => {
+  test("is held for a person, who can confirm it; the confirmation is attributed", () => {
+    pay("a");
+    recon.importBankLines([line("x", { reference: "PP-a", receiver: undefined })], "ops");
+    expect(recon.report().items[0]).toMatchObject({ status: "ambiguous", reason: "receiver_unverified", candidates: ["a"] });
+    recon.resolveMatch({ bankLineId: "x", ledgerKey: "a", resolvedBy: "ops@co", note: "checked the payee in PayPal" });
+    expect(recon.report().items[0]).toMatchObject({ status: "matched", method: "operator" });
+    expect(store.audit.entries().find((e) => e.type === "recon_match_confirmed")?.payload).toMatchObject({ bankLineId: "x", ledgerKey: "a", resolvedBy: "ops@co" });
+  });
+});
+
+describe("reopening a rejected adjustment", () => {
+  /** A $0.10 short settlement whose difference adjustment was rejected. */
+  const rejected = () => {
+    pay("a");
+    recon.importBankLines([line("a", { reference: "PP-a", amount: 4490 })], "ops");
+    const adj = recon.run("ops").proposed[0]!;
+    recon.resolveAdjustment(adj.id, { approver: "cfo@co", approve: false, note: "not now" });
+    return adj;
+  };
+
+  test("a rejection does not come back on its own, so the queue is not nagged after every run", () => {
+    rejected();
+    expect(recon.run("ops").proposed).toEqual([]);
+    expect(recon.adjustments("proposed")).toEqual([]);
+  });
+
+  test("a person can reopen it: a new proposal, attributed and audited, and the rejection itself is left as it was", () => {
+    const adj = rejected();
+    const reopened = recon.reopenAdjustment(adj.id, { reopenedBy: "cfo@co" });
+    expect(reopened).toMatchObject({ status: "proposed", itemId: adj.itemId, kind: "difference", amount: -10 });
+    expect(reopened.id).not.toBe(adj.id);
+    expect(recon.adjustments().map((a) => a.status).sort()).toEqual(["proposed", "rejected"]);
+    expect(recon.adjustments().find((a) => a.id === adj.id)).toMatchObject({ status: "rejected", resolvedBy: "cfo@co", note: "not now" });
+    expect(store.audit.entries().find((e) => e.type === "recon_adjustment_reopened")?.payload).toMatchObject({ adjustmentId: reopened.id, reopenedFrom: adj.id, reopenedBy: "cfo@co", amount: -10 });
+  });
+
+  test("approving the reopened proposal clears the line (the 'still applies' check must not depend on the id)", () => {
+    const adj = rejected();
+    const reopened = recon.reopenAdjustment(adj.id, { reopenedBy: "cfo@co" });
+    expect(recon.report().items[0]?.status).toBe("ambiguous");
+    recon.resolveAdjustment(reopened.id, { approver: "cfo@co", approve: true });
+    expect(recon.report().items[0]).toMatchObject({ status: "matched" });
+    expect(store.audit.verify()).toMatchObject({ ok: true });
+  });
+
+  test("it can be rejected again and reopened again, each time as a new row", () => {
+    const adj = rejected();
+    const first = recon.reopenAdjustment(adj.id, { reopenedBy: "cfo@co" });
+    recon.resolveAdjustment(first.id, { approver: "cfo@co", approve: false });
+    const second = recon.reopenAdjustment(first.id, { reopenedBy: "cfo@co" });
+    expect(new Set([adj.id, first.id, second.id]).size).toBe(3);
+    expect(recon.adjustments("proposed")).toHaveLength(1);
+  });
+
+  test("only a rejected adjustment can be reopened, and only once at a time", () => {
+    const adj = rejected();
+    const reopened = recon.reopenAdjustment(adj.id, { reopenedBy: "cfo@co" });
+    expect(() => recon.reopenAdjustment(adj.id, { reopenedBy: "cfo@co" })).toThrow(/already waiting or approved/);
+    expect(() => recon.reopenAdjustment(reopened.id, { reopenedBy: "cfo@co" })).toThrow(/only a rejected adjustment/);
+    recon.resolveAdjustment(reopened.id, { approver: "cfo@co", approve: true });
+    expect(() => recon.reopenAdjustment(reopened.id, { reopenedBy: "cfo@co" })).toThrow(/only a rejected adjustment/);
+    expect(() => recon.reopenAdjustment("adj_nope", { reopenedBy: "cfo@co" })).toThrow(/unknown/);
+  });
+
+  test("needs a named person", () => {
+    const adj = rejected();
+    expect(() => recon.reopenAdjustment(adj.id, { reopenedBy: " " })).toThrow(ReconInputError);
+    expect(recon.adjustments("proposed")).toEqual([]);
+  });
+
+  test("is refused when the books have moved on", () => {
+    const adj = rejected();
+    store.db.prepare("UPDATE executions SET state = 'failed' WHERE idempotency_key = 'a'").run();
+    expect(() => recon.reopenAdjustment(adj.id, { reopenedBy: "cfo@co" })).toThrow(/no longer applies/);
+    expect(recon.adjustments("proposed")).toEqual([]);
+  });
+
+  test("works for a rejected fee as well", () => {
+    pay("a");
+    recon.importBankLines([line("a", { reference: "PP-a", fee: 30 })], "ops");
+    const fee = recon.run("ops").proposed[0]!;
+    recon.resolveAdjustment(fee.id, { approver: "cfo@co", approve: false });
+    expect(recon.reopenAdjustment(fee.id, { reopenedBy: "cfo@co" })).toMatchObject({ kind: "fee", amount: 30, status: "proposed" });
+  });
+});

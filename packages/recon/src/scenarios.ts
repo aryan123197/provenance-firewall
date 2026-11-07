@@ -60,6 +60,7 @@ export const SCENARIOS: Scenario[] = [
   { id: "penny-short", title: "Settled one cent short", kind: "trap", bank: [bk("b1", { reference: "PP-p1", amount: 44_999 })], ledger: [led("p1")], truth: { b1: "p1" }, review: ["b1"] },
   { id: "large-short", title: "Settled $200 short, close enough to look like rounding", kind: "trap", bank: [bk("b1", { reference: "PP-p1", amount: 25_000 })], ledger: [led("p1")], truth: { b1: "p1" }, review: ["b1"] },
   { id: "receiver-differs", title: "Right reference and amount, but the money went to a different account", kind: "trap", bank: [bk("b1", { reference: "PP-p1", receiver: "attacker@evil.example" })], ledger: [led("p1")], truth: {}, review: ["b1"] },
+  { id: "no-receiver", title: "Right reference and amount, but the line does not say who was paid", kind: "trap", bank: [(({ receiver: _r, ...rest }) => rest)(bk("b1", { reference: "PP-p1" }))], ledger: [led("p1")], truth: {}, review: ["b1"] },
   { id: "currency-differs", title: "Same number in a different currency", kind: "trap", bank: [bk("b1", { reference: "PP-p1", currency: "EUR" })], ledger: [led("p1")], truth: {}, review: ["b1"] },
 ];
 

@@ -61,8 +61,15 @@ try {
     const r = await fetch(`${base}/api/recon/${path}`, { method: "POST", headers: json, body: JSON.stringify(body) });
     if (!r.ok) throw new Error(`seeding the Close screen failed at /api/recon/${path}: ${r.status} ${await r.text()}`);
   }
-  const seeded = (await (await fetch(`${base}/api/recon`)).json()) as { report: { items: { status: string }[] }; adjustments: unknown[] };
-  if (seeded.report.items.filter((i) => i.status !== "matched").length < 2 || seeded.adjustments.length < 2) throw new Error("the Close screen was seeded but has no queue or adjustments to check");
+  // Reject one adjustment so the resolved list, with its Reopen button, is on the screen too.
+  const waiting = ((await (await fetch(`${base}/api/recon`)).json()) as { adjustments: { id: string; status: string }[] }).adjustments.filter((a) => a.status === "proposed");
+  if (waiting.length < 2) throw new Error("the Close screen was seeded but has fewer than two adjustments to check");
+  const rej = await fetch(`${base}/api/recon/adjustments/${encodeURIComponent(waiting[0]!.id)}/reject`, { method: "POST", headers: json, body: JSON.stringify({ approver: "ui-check" }) });
+  if (!rej.ok) throw new Error(`seeding a rejected adjustment failed: ${rej.status} ${await rej.text()}`);
+  const seeded = (await (await fetch(`${base}/api/recon`)).json()) as { report: { items: { status: string }[] }; adjustments: { status: string }[] };
+  if (seeded.report.items.filter((i) => i.status !== "matched").length < 2 || !seeded.adjustments.some((a) => a.status === "proposed") || !seeded.adjustments.some((a) => a.status === "rejected")) {
+    throw new Error("the Close screen was seeded but has no queue, waiting adjustment and rejected adjustment to check");
+  }
 
   const key = ((await (await fetch(`${base}/api/decisions`)).json()) as { decisions: { idempotencyKey: string }[] }).decisions[0]?.idempotencyKey;
   const routes = ["#/activity", "#/approvals", "#/recon", "#/registry", "#/policy", ...(key ? [`#/decision/${encodeURIComponent(key)}`] : [])];

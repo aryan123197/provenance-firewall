@@ -68,7 +68,7 @@ The agent proposes, the firewall decides, and only an allowed intent (or one a p
 | PayPal Payouts adapter and webhook verification | **Run against the live PayPal sandbox (2026-11-07)**: payout created and read back, a resubmitted payout resolves to the original, webhook register/list/delete work and a forged event is rejected. That run found one wrong assumption (where PayPal puts the link to the original payout), now fixed. Re-check any time with `pnpm sandbox:check`. A genuinely signed webhook delivery needs a public URL and has not been seen yet. |
 | PayPal Invoicing adapter | Implemented against PayPal's documented API and tested against an in-process fake (including an injected invoice read through the client and run through both agents). **Not run live**: the sandbox app needs the Invoicing feature enabled. [docs/PAYPAL_ASSUMPTIONS.md](docs/PAYPAL_ASSUMPTIONS.md) lists every API assumption, how well each is backed, and what was seen live. |
 | Red-team harness and scorecard | Runs offline. Agent is a deterministic stand-in; payments are an in-process fake. |
-| Close and reconciliation (`packages/recon`): PayPal settlement lines against the ledger and purchase orders, ambiguity to a person, approved adjustments, 13-scenario scorecard | Implemented and tested against the in-process fake, with a **Close** tab in the dashboard (match queue, adjustment approvals, settlement-line import). The settlement-line input format is a design assumption, **not yet checked against a real PayPal report**. |
+| Close and reconciliation (`packages/recon`): PayPal settlement lines against the ledger and purchase orders, ambiguity to a person, approved adjustments, 14-scenario scorecard | Implemented and tested against the in-process fake, with a **Close** tab in the dashboard (match queue, adjustment approvals, settlement-line import). The settlement-line input format is a design assumption, **not yet checked against a real PayPal report**. |
 | Dashboard (activity, decision replay, approvals, registry, policy and scorecard) | Implemented. Operator actions need the operator token, entered in the header. |
 | Plain-English policy authoring (compile, diff, generated tests, confirm, versioned in the audit log) | Implemented and tested with a fake model. **Not yet run against the live Claude API.** |
 | Claude-driven procurement agent (`pnpm harness:llm`, and the demo toggle) | Implemented and tested with a fake model. **Not yet run against the live Claude API, so there are no published numbers for a real model.** |
@@ -80,8 +80,8 @@ Without PayPal credentials the server runs in **simulated** mode and the dashboa
 The firewall already refuses bad payments. `packages/recon` checks the other side at close: did the money that PayPal says moved match the payments we authorized, and does each one tie to a purchase order?
 
 - **Matching is code, not a model.** A pure function pairs PayPal settlement lines with the payments the firewall executed: an operator's confirmation, then a shared PayPal reference, then (only for lines with no reference) the same amount, receiver and date window when exactly one payment fits. A line carrying a reference we do not recognise is never matched on anything else. The memo field is stored for a person to read and is never used to match.
-- **Ambiguity goes to a person.** Several candidates, two lines for one payment, a different receiver or currency, or any difference in amount is `ambiguous`; no fit is `unmatched`. A person confirms one open candidate, attributed and audited, and that still cannot wave through a different receiver.
-- **Adjustments are proposed, never posted.** PayPal's fee on a matched payment, or a small difference (default ceiling 5.00) on a pair, is proposed; above the ceiling nothing is proposed. Approval is attributed, single use, re-checked against the books as they are now, and written to the signed audit log with the evidence. An approved difference is what lets that item become `matched`.
+- **Ambiguity goes to a person.** Several candidates, two lines for one payment, a different receiver or currency, or any difference in amount is `ambiguous`; no fit is `unmatched`. A line that does not say who was paid is held too (the payee cannot be checked), and a person can confirm it. A person confirms one open candidate, attributed and audited, and that still cannot wave through a different receiver.
+- **Adjustments are proposed, never posted.** PayPal's fee on a matched payment, or a small difference (default ceiling 5.00) on a pair, is proposed; above the ceiling nothing is proposed. Approval is attributed, single use, re-checked against the books as they are now, and written to the signed audit log with the evidence. An approved difference is what lets that item become `matched`. A rejection is final and audited but not a dead end: a person can reopen it, which adds a new proposal that goes through approval again (nothing reopens on its own, so a rejection is not nagged about after every run).
 - **Integer cents throughout.** Totals per currency always add up: every bank line lands in exactly one item (property-tested).
 
 ```sh
@@ -90,13 +90,13 @@ pnpm harness:recon    # regenerate reports/recon-scorecard.md
 
 | | Baseline (trusts memo text, fuzzy amounts, writes off differences) | Reconciler |
 | --- | --- | --- |
-| Lines that needed a person but were settled wrongly or without one | 9 of 9 | **0 of 9** |
+| Lines that needed a person but were settled wrongly or without one | 10 of 10 | **0 of 10** |
 | Ordinary and noisy-memo lines matched correctly on their own | 6 of 7 | **7 of 7** |
 | Adjustments posted with no person | 4 ($530.91) | **0** |
 
 Same caveats as the payment scorecard: the baseline is a deterministic stand-in and the bank lines are hand-written fixtures. See [reports/recon-scorecard.md](reports/recon-scorecard.md).
 
-The dashboard's **Close** tab shows the totals, a queue of lines that need a person (with the candidate payments to choose from, and the memo shown as inert, labelled text), the adjustments waiting for approval, and what matched. Problems a confirmation cannot clear (a different receiver or currency, an amount difference, a purchase-order mismatch) offer no confirm button. API (writes need the operator token): `GET /api/recon`, `POST /api/recon/bank-lines`, `POST /api/recon/run`, `POST /api/recon/matches`, `POST /api/recon/adjustments/:id/approve|reject`.
+The dashboard's **Close** tab shows the totals, a queue of lines that need a person (with the candidate payments to choose from, and the memo shown as inert, labelled text), the adjustments waiting for approval, and what matched. Problems a confirmation cannot clear (a different receiver or currency, an amount difference, a purchase-order mismatch) offer no confirm button. API (writes need the operator token): `GET /api/recon`, `POST /api/recon/bank-lines`, `POST /api/recon/run`, `POST /api/recon/matches`, `POST /api/recon/adjustments/:id/approve|reject|reopen`.
 
 ## Quick start
 

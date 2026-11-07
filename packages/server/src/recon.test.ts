@@ -64,6 +64,7 @@ describe("reconciliation API", () => {
       ["/api/recon/matches", { bankLineId: "a", ledgerKey: "b", resolvedBy: "x" }],
       ["/api/recon/adjustments/adj_1/approve", { approver: "x" }],
       ["/api/recon/adjustments/adj_1/reject", { approver: "x" }],
+      ["/api/recon/adjustments/adj_1/reopen", { reopenedBy: "x" }],
     ] as const) {
       expect((await post(url, body, {})).statusCode, url).toBe(401);
     }
@@ -144,5 +145,37 @@ describe("confirming a match over the API", () => {
     expect((r.json() as { error: string }).error).toMatch(/cannot be cleared by confirming/);
     const audit = (await app.inject({ url: "/api/audit?limit=500" })).json() as { entries: { type: string }[] };
     expect(audit.entries.some((e) => e.type === "recon_match_confirmed")).toBe(false);
+  });
+});
+
+describe("reopening a rejected adjustment over the API", () => {
+  test("reject, reopen, approve: the line ends up matched, and each step is attributed in the audit log", async () => {
+    await post("/api/recon/bank-lines", { importedBy: "ops", lines: [line({ amount: 4490 })] });
+    const first = ((await post("/api/recon/run", { runBy: "ops" })).json() as { proposed: { id: string }[] }).proposed[0]!;
+    await post(`/api/recon/adjustments/${first.id}/reject`, { approver: "cfo@co", note: "not now" });
+
+    expect((await post(`/api/recon/adjustments/${first.id}/reopen`, {})).statusCode).toBe(400);
+    const reopened = (await post(`/api/recon/adjustments/${first.id}/reopen`, { reopenedBy: "cfo@co" })).json() as { id: string; status: string };
+    expect(reopened.status).toBe("proposed");
+    expect((await post(`/api/recon/adjustments/${first.id}/reopen`, { reopenedBy: "cfo@co" })).statusCode).toBe(409);
+    expect((await post("/api/recon/adjustments/adj_nope/reopen", { reopenedBy: "cfo@co" })).statusCode).toBe(404);
+
+    expect((await post(`/api/recon/adjustments/${reopened.id}/approve`, { approver: "cfo@co" })).json()).toMatchObject({ status: "approved" });
+    const view = (await app.inject({ url: "/api/recon" })).json() as { report: { items: { bankLineId: string; status: string }[] } };
+    expect(view.report.items.find((i) => i.bankLineId === "bl1")?.status).toBe("matched");
+    const audit = (await app.inject({ url: "/api/audit?limit=500" })).json() as { entries: { type: string; payload: { reopenedBy?: string } }[] };
+    expect(audit.entries.find((e) => e.type === "recon_adjustment_reopened")?.payload.reopenedBy).toBe("cfo@co");
+    expect((await app.inject({ url: "/api/audit/verify" })).json()).toMatchObject({ ok: true });
+  });
+});
+
+describe("a bank line without a receiver over the API", () => {
+  test("is held, then a person can confirm it", async () => {
+    const { receiver: _r, ...noReceiver } = line();
+    await post("/api/recon/bank-lines", { importedBy: "ops", lines: [noReceiver] });
+    const view = (await post("/api/recon/run", { runBy: "ops" })).json() as { report: { items: { reason: string }[] } };
+    expect(view.report.items[0]?.reason).toBe("receiver_unverified");
+    expect((await post("/api/recon/matches", { bankLineId: "bl1", ledgerKey: "k1", resolvedBy: "ops@co" })).json()).toEqual({ ok: true });
+    expect(((await app.inject({ url: "/api/recon" })).json() as { report: { items: { status: string }[] } }).report.items[0]?.status).toBe("matched");
   });
 });

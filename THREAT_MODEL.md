@@ -57,6 +57,7 @@ Settlement lines are a second place untrusted text enters: a memo, a reference o
 | A forged or unknown reference to look like one of our payments | A line with a reference we do not recognise is `unmatched`; it does not fall back to amount matching. |
 | A payout we did not authorize with the same amount as one we did | Same: `unmatched`, and the real payment stays "not settled" rather than being credited. |
 | Money settled to a different account, or in a different currency, with an otherwise perfect match | `ambiguous`; no adjustment is proposed; a person cannot confirm it through the match endpoint either. |
+| A line with a perfect reference and amount but no receiver, so the payee is never checked | Never matched on its own: `ambiguous` (`receiver_unverified`) until a person confirms it. |
 | The same payout reported twice | Both lines are `ambiguous` (two lines claim one payment); neither matches. |
 | A small "rounding" difference used to hide a larger one | Differences are never absorbed by the matcher. Only a person can approve an adjustment, one at a time, up to a fixed ceiling, re-checked at approval time. |
 | Editing or deleting a settlement line after the fact | Lines are append-only in the database; re-importing a known id with different content is refused. Imports, runs, confirmations and adjustments are signed audit entries. |
