@@ -4,7 +4,7 @@ import { Fragment, useMemo } from "react";
 import { api, type Drift, type ScenarioResultView } from "../api";
 import { Card, Empty, ErrorNote } from "../components/ui";
 import { PolicyEditor } from "./PolicyEditor";
-import { usePoll } from "../hooks";
+import { useNarrow, usePoll } from "../hooks";
 import { CATEGORY_LABEL, RULES, dateTime, money, shortHash } from "../labels";
 import { gridTheme } from "../theme";
 
@@ -61,19 +61,35 @@ export function PolicyScreen() {
   );
 }
 
+/**
+ * The scorecard's columns. On a phone what matters is what each scenario cost without and with the firewall, so those two stay next to
+ * the scenario name; the category and the rules that fired are dropped (the decision pages show the rules).
+ */
+/** Row height on a phone: up to three lines of wrapped text plus padding. */
+export const SCORECARD_ROW_NARROW = 68;
+
+export function scorecardColumns(narrow: boolean): ColDef<ScenarioResultView>[] {
+  const all: ColDef<ScenarioResultView>[] = [
+    { headerName: "Scenario", field: "title", flex: narrow ? 1.2 : 1.6, minWidth: narrow ? 100 : 240 },
+    { headerName: "Category", field: "category", width: 160, valueFormatter: (p) => CATEGORY_LABEL[p.value as string] ?? String(p.value) },
+    { headerName: "Unprotected", flex: 1, minWidth: narrow ? 100 : 170, valueGetter: (p) => (p.data ? side(p.data, "baseline") : ""), cellRenderer: sideCell("baseline") },
+    { headerName: "Firewalled", flex: 1, minWidth: narrow ? 108 : 190, valueGetter: (p) => (p.data ? side(p.data, "firewalled") : ""), cellRenderer: sideCell("firewalled") },
+    { headerName: "Rules that fired", valueGetter: (p) => p.data?.firewalled.rules.map((r) => RULES[r]?.title ?? r).join(", ") ?? "", flex: 1.4, minWidth: 220 },
+  ];
+  if (!narrow) return all;
+  // Long titles and outcomes wrap onto a second line instead of being cut off; the grid gives rows room for three lines (see SCORECARD_ROW_NARROW).
+  return all.map((c) => ({
+    ...c,
+    suppressHeaderFilterButton: true,
+    ...(c.field === "category" || c.headerName === "Rules that fired" ? { hide: true } : { wrapText: true, cellStyle: { lineHeight: "1.25", padding: "6px 8px" } }),
+  }));
+}
+
 function Scorecard() {
   const { data: card, error } = usePoll(api.scorecard, 60000);
 
-  const cols = useMemo<ColDef<ScenarioResultView>[]>(
-    () => [
-      { headerName: "Scenario", field: "title", flex: 1.6, minWidth: 240 },
-      { headerName: "Category", field: "category", width: 160, valueFormatter: (p) => CATEGORY_LABEL[p.value as string] ?? String(p.value) },
-      { headerName: "Unprotected", flex: 1, minWidth: 170, valueGetter: (p) => (p.data ? side(p.data, "baseline") : ""), cellRenderer: sideCell("baseline") },
-      { headerName: "Firewalled", flex: 1, minWidth: 190, valueGetter: (p) => (p.data ? side(p.data, "firewalled") : ""), cellRenderer: sideCell("firewalled") },
-      { headerName: "Rules that fired", valueGetter: (p) => p.data?.firewalled.rules.map((r) => RULES[r]?.title ?? r).join(", ") ?? "", flex: 1.4, minWidth: 220 },
-    ],
-    [],
-  );
+  const narrow = useNarrow();
+  const cols = useMemo(() => scorecardColumns(narrow), [narrow]);
 
   if (error && !card) return <Card title="Red-team scorecard"><Empty title="No scorecard yet">Run <code>pnpm harness</code> to generate one.</Empty></Card>;
   if (!card) return null;
@@ -101,6 +117,7 @@ function Scorecard() {
           columnDefs={cols}
           defaultColDef={{ sortable: true, resizable: true, filter: true }}
           getRowId={(p) => p.data.id}
+          {...(narrow ? { rowHeight: SCORECARD_ROW_NARROW } : {})}
           suppressCellFocus
         />
       </div>
