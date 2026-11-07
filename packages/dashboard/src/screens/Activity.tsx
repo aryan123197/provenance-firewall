@@ -10,6 +10,8 @@ import { gridTheme } from "../theme";
 /**
  * The activity grid's columns. On a narrow screen only what identifies a payment stays (verdict, payee, amount): the time, the rule,
  * the payee's source and the outcome are all on the decision page one tap away, and cramming them in leaves the payee off screen.
+ * On a wide screen the amount sits right after the verdict: between a phone and about 1230px the grid scrolls sideways, and the
+ * money should be on screen while the rule, payee and outcome are what scroll.
  */
 export function activityColumns(narrow: boolean): ColDef<DecisionSummary>[] {
   const all: ColDef<DecisionSummary>[] = [
@@ -31,6 +33,7 @@ export function activityColumns(narrow: boolean): ColDef<DecisionSummary>[] {
           ) : null,
       },
       { headerName: "Verdict", field: "verdict", width: 164, cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <VerdictPill verdict={p.data.verdict} /> : null) },
+      { headerName: "Amount", field: "amount", width: 130, type: "rightAligned", filter: "agNumberColumnFilter", valueFormatter: (p) => money(p.value as number, p.data?.currency) },
       { headerName: "Rule that decided", field: "rule", flex: 1.3, minWidth: 225, valueFormatter: (p) => ruleTitle(p.value as string), cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <span>{ruleTitle(p.data.rule)}{p.data.alert && <span className="alert-dot" title="Raised an alert"> ⚑</span>}</span> : null) },
       {
         headerName: "Payee",
@@ -48,7 +51,6 @@ export function activityColumns(narrow: boolean): ColDef<DecisionSummary>[] {
             <span title={p.data.payee}>{p.data.payee}</span>
           ),
       },
-      { headerName: "Amount", field: "amount", width: 130, type: "rightAligned", filter: "agNumberColumnFilter", valueFormatter: (p) => money(p.value as number, p.data?.currency) },
       { headerName: "Source", headerTooltip: "Where the payee came from", field: "payeeTrust", width: 100, filter: "agNumberColumnFilter", cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <TrustChip trust={p.data.payeeTrust} compact /> : null) },
       { headerName: "Outcome", flex: 1, minWidth: 165, valueGetter: (p) => (p.data ? outcome(p.data) : "") },
   ];

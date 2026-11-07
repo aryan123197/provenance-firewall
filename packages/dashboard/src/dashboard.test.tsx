@@ -411,13 +411,19 @@ describe("activity grid on small screens", () => {
   const shown = (narrow: boolean) => activityColumns(narrow).filter((c) => !c.hide).map((c) => c.headerName);
 
   test("a wide screen shows every column", () => {
-    expect(shown(false)).toEqual(["Time", "Verdict", "Rule that decided", "Payee", "Amount", "Source", "Outcome"]);
+    expect(shown(false)).toEqual(["Time", "Verdict", "Amount", "Rule that decided", "Payee", "Source", "Outcome"]);
   });
 
   test("on a phone the visible columns fit a 390px screen, so no value is clipped at the grid's edge", () => {
     // 390 minus page and card padding leaves about 323px for the grid, and its own vertical scrollbar takes about 15 of those.
     const total = activityColumns(true).filter((c) => !c.hide).reduce((n, c) => n + (c.width ?? c.minWidth ?? 0), 0);
     expect(total).toBeLessThanOrEqual(305);
+  });
+
+  test("the amount stays on screen in a window too narrow for every column, because it sits right after the verdict", () => {
+    const wide = activityColumns(false);
+    const before = wide.slice(0, wide.findIndex((c) => c.headerName === "Amount") + 1).reduce((n, c) => n + (c.width ?? c.minWidth ?? 0), 0);
+    expect(before).toBeLessThanOrEqual(480); // fits a 700px window with the page and card padding and the scrollbar strip
   });
 
   test("the time column is wide enough for the widest clock times, which 118px clipped", () => {
