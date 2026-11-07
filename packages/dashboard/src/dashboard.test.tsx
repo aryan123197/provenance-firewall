@@ -6,6 +6,7 @@ import { OperatorSignIn } from "./App";
 import { activityColumns } from "./screens/Activity";
 import { scorecardColumns } from "./screens/Policy";
 import { useNarrow } from "./hooks";
+import { outcome } from "./labels";
 import { api, operatorToken, type Approval, type CompileResult, type PolicyView } from "./api";
 import { Approvals } from "./screens/Approvals";
 import { PolicyEditor } from "./screens/PolicyEditor";
@@ -509,5 +510,19 @@ describe("registry tables on small screens", () => {
     const [vendors, orders] = [...container.querySelectorAll("table.registry")];
     expect(labels(vendors!)).toEqual(["Id", "Name", "Pays into", "Category", ""]);
     expect(labels(orders!)).toEqual(["Id", "Vendor", "Amount", "Status"]);
+  });
+});
+
+describe("how a sent payment is described", () => {
+  const sent = (providerStatus: string | null) => outcome({ verdict: "allow", execution: "executed", providerStatus, approval: null });
+  test("only a confirmed payout says paid, and a payout PayPal is still processing says so", () => {
+    expect(sent("success")).toBe("Paid · PayPal success");
+    expect(sent("pending")).toBe("Sent · PayPal pending");
+    expect(sent(null)).toBe("Sent to PayPal");
+  });
+  test("a payout the recipient has not claimed, or that came back or failed, is not called paid", () => {
+    expect(sent("unclaimed")).toBe("Sent · unclaimed by recipient");
+    expect(sent("returned")).toBe("Returned by recipient");
+    expect(sent("failed")).toBe("Failed at PayPal");
   });
 });
