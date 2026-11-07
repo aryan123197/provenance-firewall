@@ -488,3 +488,12 @@ describe("registry tables on small screens", () => {
     expect(labels(orders!)).toEqual(["Id", "Vendor", "Amount", "Status"]);
   });
 });
+
+describe("activity summary", () => {
+  test("counts verdicts and sums money in USD only", async () => {
+    const { summarize } = await import("./screens/Activity");
+    const d = (o: Record<string, unknown>) => ({ currency: "USD", amount: 100, verdict: "allow", execution: null, approval: null, ...o }) as never;
+    const s = summarize([d({ execution: "executed" }), d({ verdict: "deny", amount: 450 }), d({ verdict: "deny", currency: "EUR", amount: 999 }), d({ verdict: "require_approval", approval: { status: "pending" } })]);
+    expect(s).toMatchObject({ total: 4, allow: 1, deny: 2, require_approval: 1, blocked: 450, paid: 100, otherCurrency: 1 });
+  });
+});

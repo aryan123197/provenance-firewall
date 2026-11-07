@@ -324,3 +324,20 @@ textarea:disabled, input:disabled { opacity: 0.6; }
 
 .drift-demo { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
 .ok-text { color: var(--allow); font-weight: 600; } .bad-text { color: var(--deny); font-weight: 600; }
+
+/* Pills and chips inside grid cells inherit the grid's tall line-height; keep them pill-sized and centred. */
+.ag-cell .pill, .ag-cell .chip { line-height: 20px; vertical-align: middle; }
+.ag-cell .chip { line-height: 18px; }
+
+/* Summary strip on the activity screen. Verdict tiles are filter toggles. */
+.summary { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.tile { font: inherit; text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); cursor: pointer; }
+.tile.static { cursor: default; }
+.tile:not(.static):hover { background: var(--hover); }
+.tile[aria-pressed="true"] { border-color: var(--accent); background: var(--hover); }
+.tile-value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.tile-label { font-size: 12.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.tile.allow .tile-value { color: var(--allow); }
+.tile.approve .tile-value { color: var(--approve); }
+.tile.deny .tile-value, .tile.blocked .tile-value { color: var(--deny); }
+@media (max-width: 760px) { .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

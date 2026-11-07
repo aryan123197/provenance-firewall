@@ -75,6 +75,7 @@ export function Activity({ open, demo, llm, onChange }: { open: (to: string) => 
 
   return (
     <div className="stack">
+      {data && data.length > 0 && <SummaryStrip decisions={data} active={verdict} onPick={setVerdict} />}
       {demo && <DemoRunner llm={llm} onRan={() => { void refresh(); onChange(); }} open={open} />}
       <Card
         title="Live activity"
@@ -129,6 +130,53 @@ export function Activity({ open, demo, llm, onChange }: { open: (to: string) => 
         )}
         <p className="hint">Click a row to see why. Every decision, including denials, is written to the signed audit log.</p>
       </Card>
+    </div>
+  );
+}
+
+/**
+ * What the firewall has done so far, at a glance. Each count doubles as a filter for the grid below.
+ * Money is summed in USD only (the policy's currency): adding euros to dollars would be a wrong number, so other currencies are left out.
+ */
+export function summarize(decisions: DecisionSummary[]) {
+  const usd = decisions.filter((d) => d.currency === "USD");
+  const sum = (f: (d: DecisionSummary) => boolean) => usd.filter(f).reduce((a, d) => a + d.amount, 0);
+  return {
+    total: decisions.length,
+    allow: decisions.filter((d) => d.verdict === "allow").length,
+    require_approval: decisions.filter((d) => d.verdict === "require_approval").length,
+    deny: decisions.filter((d) => d.verdict === "deny").length,
+    blocked: sum((d) => d.verdict === "deny" || d.approval?.status === "rejected"),
+    paid: sum((d) => d.execution === "executed"),
+    otherCurrency: decisions.length - usd.length,
+  };
+}
+
+function SummaryStrip({ decisions, active, onPick }: { decisions: DecisionSummary[]; active: string; onPick: (v: "all" | DecisionSummary["verdict"]) => void }) {
+  const s = summarize(decisions);
+  const note = s.otherCurrency > 0 ? ` USD only; ${s.otherCurrency} decision${s.otherCurrency > 1 ? "s" : ""} in other currencies not counted.` : " USD.";
+  const tiles: { key: "all" | DecisionSummary["verdict"]; label: string; value: string | number; cls: string }[] = [
+    { key: "all", label: "Decisions", value: s.total, cls: "" },
+    { key: "allow", label: "Allowed", value: s.allow, cls: "allow" },
+    { key: "require_approval", label: "Needs approval", value: s.require_approval, cls: "approve" },
+    { key: "deny", label: "Denied", value: s.deny, cls: "deny" },
+  ];
+  return (
+    <div className="summary" role="group" aria-label="Summary of decisions">
+      {tiles.map((t) => (
+        <button key={t.key} className={`tile ${t.cls}`} aria-pressed={active === t.key} onClick={() => onPick(active === t.key ? "all" : t.key)} title={`Show ${t.label.toLowerCase()}`}>
+          <span className="tile-value">{t.value}</span>
+          <span className="tile-label">{t.label}</span>
+        </button>
+      ))}
+      <div className="tile static blocked" title={`Total of denied and rejected payments.${note}`}>
+        <span className="tile-value">{money(s.blocked)}</span>
+        <span className="tile-label">Blocked</span>
+      </div>
+      <div className="tile static" title={`Total actually sent to PayPal.${note}`}>
+        <span className="tile-value">{money(s.paid)}</span>
+        <span className="tile-label">Paid out</span>
+      </div>
     </div>
   );
 }
