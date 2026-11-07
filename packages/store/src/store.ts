@@ -641,6 +641,12 @@ export class Store {
     }).immediate();
   }
 
+  /** Sent payouts whose money did not arrive as paid: unclaimed by the recipient, returned, or failed at the provider. */
+  countPayoutsNeedingAttention(): number {
+    const r = this.db.prepare("SELECT COUNT(*) AS n FROM executions WHERE state = 'executed' AND provider_status IN ('unclaimed', 'returned', 'failed')").get() as { n: number };
+    return r.n;
+  }
+
   listDrift(status?: Drift["status"]): Drift[] {
     const rows = this.db
       .prepare(`SELECT * FROM drift ${status ? "WHERE status = ?" : ""} ORDER BY id`)

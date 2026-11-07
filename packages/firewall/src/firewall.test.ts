@@ -313,6 +313,16 @@ describe("webhook reconciliation", () => {
     await hook(itemEvent({ id: "s2", batch: r.reference, status: "SUCCESS" }));
     expect(store.getExecution("pay-1")?.providerStatus).toBe("returned");
   });
+  test("payouts that did not arrive as paid are counted for the operator, and a later success clears the count", async () => {
+    const r = await pay();
+    expect(store.countPayoutsNeedingAttention()).toBe(0);
+    await hook(itemEvent({ id: "u", batch: r.reference, status: "UNCLAIMED", type: "PAYMENT.PAYOUTS-ITEM.UNCLAIMED" }));
+    expect(store.countPayoutsNeedingAttention()).toBe(1);
+    await hook(itemEvent({ id: "s", batch: r.reference, status: "SUCCESS" }));
+    expect(store.countPayoutsNeedingAttention()).toBe(0);
+    await hook(itemEvent({ id: "r", batch: r.reference, status: "RETURNED", type: "PAYMENT.PAYOUTS-ITEM.RETURNED" }));
+    expect(store.countPayoutsNeedingAttention()).toBe(1);
+  });
   test("unrelated event types are ignored", async () => {
     expect(await hook(JSON.stringify({ id: "WH-X", event_type: "CUSTOMER.DISPUTE.CREATED", resource: {} }))).toEqual({ status: "ignored" });
   });

@@ -64,6 +64,13 @@ export function App() {
         </div>
       )}
 
+      {status && status.payoutsNeedingAttention > 0 && (
+        <div className="banner warn wide" role="status">
+          {status.payoutsNeedingAttention} sent payout{status.payoutsNeedingAttention > 1 ? "s have" : " has"} not arrived as paid: unclaimed by the recipient, returned, or failed at PayPal.{" "}
+          <a href="#/activity">See Live activity</a>
+        </div>
+      )}
+
       <main id="main">
         {error && !status && <div className="error-note">Cannot reach the firewall API: {error}</div>}
         {decisionMatch ? (

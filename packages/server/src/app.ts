@@ -115,6 +115,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
       llmAgentAvailable: Boolean(deps.llmAgent),
       audit: audit.ok ? { ok: true, count: audit.count, head: audit.head } : { ok: false, seq: audit.seq, reason: audit.reason },
       driftOpen: store.listDrift("open").length,
+      payoutsNeedingAttention: store.countPayoutsNeedingAttention(),
       pendingApprovals: store.listApprovals("pending").length,
     };
   });
