@@ -9,7 +9,7 @@ Run from the repository root with `pnpm <name>`. The ones that talk to PayPal ne
 | `pnpm e2e` | The scripted payment: attack, legitimate payment, retry. The attack step runs offline. |
 | `pnpm harness` | Regenerates `reports/scorecard.{md,json}` (deterministic, offline). |
 | `pnpm harness:llm` | The same scenarios with a real Claude agent. Needs `ANTHROPIC_API_KEY`; paid. |
-| `pnpm seed:invoices`, `pnpm demo:invoices` | Create a clean and an injected invoice in the sandbox, then read them back through both agents. Need the Invoicing feature on the app. |
+| `pnpm seed:invoices`, `pnpm demo:invoices` | Create a clean and an injected invoice in the sandbox, then read them back through both agents. Need the Invoicing feature on the app (run live); `PFW_INVOICER_EMAIL` is optional. |
 | `pnpm register:webhook <https-url>` | Registers the webhook endpoint and prints `PAYPAL_WEBHOOK_ID`. |
 | `pnpm gen:audit-key`, `pnpm verify:audit` | Create the audit signing key; verify an exported audit log offline. |
 | `pnpm lint`, `pnpm ui:check`, `pnpm audit:deps` | The CI checks beyond the tests: Biome lint; the built dashboard in a browser for WCAG 2.1 A/AA and sideways scroll; dependency audit. See CONTRIBUTING.md. |
