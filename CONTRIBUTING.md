@@ -8,6 +8,7 @@ pnpm check      # typecheck (all packages and the dashboard) and every test
 pnpm coverage   # the same tests with a coverage floor, which CI also enforces
 pnpm build      # build the dashboard
 pnpm harness    # regenerate reports/scorecard.{md,json}
+pnpm harness:recon  # regenerate reports/recon-scorecard.md
 ```
 
 ## Rules that keep the guarantees true
@@ -18,7 +19,8 @@ pnpm harness    # regenerate reports/scorecard.{md,json}
 - **Only the adapter talks to PayPal, and only with an authorization the firewall minted.** Keep it that way.
 - **Anything that changes money-moving behaviour needs a test that fails without the change**, and a safety-relevant engine change should hold under `engine.property.test.ts`. For UI controls that gate an action, break the gating on purpose and confirm a test goes red.
 - **PayPal behaviour you assume goes in [docs/PAYPAL_ASSUMPTIONS.md](docs/PAYPAL_ASSUMPTIONS.md)**, marked confirmed or from memory, and the fake in `packages/adapter/src/testing/fake-paypal.ts` should be updated to match what PayPal really returns.
-- **If you change a scenario, the policy, or a rule,** run `pnpm harness` and commit the regenerated report; a test fails if it is stale.
+- **If you change a scenario, the policy, or a rule,** run `pnpm harness` and commit the regenerated report; a test fails if it is stale. The same goes for `pnpm harness:recon` when you change the matcher or its scenarios.
+- **The reconciliation matcher stays pure and never reads the memo.** Adjustments are proposed by code and applied only by an attributed, audited approval; do not add a path that posts one automatically.
 
 ## Pull requests
 

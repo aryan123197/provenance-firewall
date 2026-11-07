@@ -23,6 +23,9 @@ importers:
       '@pfw/llm':
         specifier: workspace:*
         version: link:packages/llm
+      '@pfw/recon':
+        specifier: workspace:*
+        version: link:packages/recon
       '@pfw/server':
         specifier: workspace:*
         version: link:packages/server
@@ -155,6 +158,18 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
 
+  packages/recon:
+    dependencies:
+      '@pfw/core':
+        specifier: workspace:*
+        version: link:../core
+      '@pfw/store':
+        specifier: workspace:*
+        version: link:../store
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+
   packages/server:
     dependencies:
       '@fastify/static':
@@ -175,6 +190,9 @@ importers:
       '@pfw/llm':
         specifier: workspace:*
         version: link:../llm
+      '@pfw/recon':
+        specifier: workspace:*
+        version: link:../recon
       '@pfw/store':
         specifier: workspace:*
         version: link:../store

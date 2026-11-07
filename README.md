@@ -59,11 +59,35 @@ The agent proposes, the firewall decides, and only an allowed intent (or one a p
 | Provenance model, policy engine, idempotency, approvals, signed audit log, reconciliation | Implemented and tested (200+ tests, including property tests over tens of thousands of random intents) |
 | PayPal Payouts and Invoicing adapters | Implemented against PayPal's documented APIs and tested against an in-process fake (including an injected invoice read through the Invoicing client and run through both agents). **Neither has yet been run against the live PayPal sandbox.** [docs/PAYPAL_ASSUMPTIONS.md](docs/PAYPAL_ASSUMPTIONS.md) lists every API assumption, how well each is backed, and a first-run checklist. |
 | Red-team harness and scorecard | Runs offline. Agent is a deterministic stand-in; payments are an in-process fake. |
+| Close and reconciliation (`packages/recon`): PayPal settlement lines against the ledger and purchase orders, ambiguity to a person, approved adjustments, 13-scenario scorecard | Implemented and tested against the in-process fake. API only: **no dashboard screen yet**. The settlement-line input format is a design assumption, **not yet checked against a real PayPal report**. |
 | Dashboard (activity, decision replay, approvals, registry, policy and scorecard) | Implemented. Operator actions need the operator token, entered in the header. |
 | Plain-English policy authoring (compile, diff, generated tests, confirm, versioned in the audit log) | Implemented and tested with a fake model. **Not yet run against the live Claude API.** |
 | Claude-driven procurement agent (`pnpm harness:llm`, and the demo toggle) | Implemented and tested with a fake model. **Not yet run against the live Claude API, so there are no published numbers for a real model.** |
 
 Without PayPal credentials the server runs in **simulated** mode and the dashboard says so. With `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` set it talks to the PayPal **sandbox** (non-sandbox hosts are refused in code).
+
+## Close and reconciliation
+
+The firewall already refuses bad payments. `packages/recon` checks the other side at close: did the money that PayPal says moved match the payments we authorized, and does each one tie to a purchase order?
+
+- **Matching is code, not a model.** A pure function pairs PayPal settlement lines with the payments the firewall executed: an operator's confirmation, then a shared PayPal reference, then (only for lines with no reference) the same amount, receiver and date window when exactly one payment fits. A line carrying a reference we do not recognise is never matched on anything else. The memo field is stored for a person to read and is never used to match.
+- **Ambiguity goes to a person.** Several candidates, two lines for one payment, a different receiver or currency, or any difference in amount is `ambiguous`; no fit is `unmatched`. A person confirms one open candidate, attributed and audited, and that still cannot wave through a different receiver.
+- **Adjustments are proposed, never posted.** PayPal's fee on a matched payment, or a small difference (default ceiling 5.00) on a pair, is proposed; above the ceiling nothing is proposed. Approval is attributed, single use, re-checked against the books as they are now, and written to the signed audit log with the evidence. An approved difference is what lets that item become `matched`.
+- **Integer cents throughout.** Totals per currency always add up: every bank line lands in exactly one item (property-tested).
+
+```sh
+pnpm harness:recon    # regenerate reports/recon-scorecard.md
+```
+
+| | Baseline (trusts memo text, fuzzy amounts, writes off differences) | Reconciler |
+| --- | --- | --- |
+| Lines that needed a person but were settled wrongly or without one | 9 of 9 | **0 of 9** |
+| Ordinary and noisy-memo lines matched correctly on their own | 6 of 7 | **7 of 7** |
+| Adjustments posted with no person | 4 ($530.91) | **0** |
+
+Same caveats as the payment scorecard: the baseline is a deterministic stand-in and the bank lines are hand-written fixtures. See [reports/recon-scorecard.md](reports/recon-scorecard.md).
+
+API (writes need the operator token): `GET /api/recon`, `POST /api/recon/bank-lines`, `POST /api/recon/run`, `POST /api/recon/matches`, `POST /api/recon/adjustments/:id/approve|reject`.
 
 ## Quick start
 
@@ -132,6 +156,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | `packages/server` | HTTP API, webhook endpoint, demo runner |
 | `packages/dashboard` | React + AG Grid operator dashboard, including the vendor registry and purchase order screen |
 | `packages/llm` | Claude-backed procurement agent and plain-English policy compiler |
+| `packages/recon` | Close and reconciliation: matcher, adjustments with approval, scenarios and scorecard |
 | `packages/harness` | 26 attack and legitimate scenarios, baseline vs firewalled runner, scorecard |
 | `policies/` | Versioned policy files |
 | `reports/` | Committed scorecard (a test fails if it is stale) |
