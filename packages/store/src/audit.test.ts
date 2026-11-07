@@ -76,7 +76,7 @@ describe("audit log", () => {
     expect(entries.map((e) => e.type)).toEqual(["decision", "decision", "execution"]);
     expect(entries[0]?.prevHash).toBe("0".repeat(64));
     expect(entries[1]?.prevHash).toBe(entries[0]?.hash);
-    expect((entries[1]?.payload as { decision: { verdict: string } }).decision.verdict).toBe("deny");
+    expect((entries[1]!.payload as { decision: { verdict: string } }).decision.verdict).toBe("deny");
     expect(store.audit.verify()).toMatchObject({ ok: true, count: 3 });
   });
   test("an empty log verifies", () => expect(store.audit.verify()).toEqual({ ok: true, count: 0, head: null }));

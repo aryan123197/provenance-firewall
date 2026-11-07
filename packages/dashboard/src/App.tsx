@@ -79,7 +79,7 @@ export function App() {
         <div className="banner warn wide" role="status">
           {status.payoutsNeedingAttention} sent payout{status.payoutsNeedingAttention > 1 ? "s have" : " has"} not arrived as paid: unclaimed by the recipient, returned, or failed at PayPal.{" "}
           <a href="#/activity">See Live activity</a>{" "}
-          <button
+          <button type="button"
             className="link"
             onClick={() => {
               setSeen(status.payoutsNeedingAttention);
@@ -125,13 +125,13 @@ export function OperatorSignIn() {
 
   if (signedIn && !open) {
     return (
-      <button className="status-chip ok chip-button" onClick={() => { operatorToken.set(""); setSignedIn(false); setValue(""); }} title="Forget the operator token in this tab">
+      <button type="button" className="status-chip ok chip-button" onClick={() => { operatorToken.set(""); setSignedIn(false); setValue(""); }} title="Forget the operator token in this tab">
         Operator signed in · sign out
       </button>
     );
   }
   if (!open) {
-    return <button className="status-chip warn chip-button" onClick={() => setOpen(true)}>Operator sign-in</button>;
+    return <button type="button" className="status-chip warn chip-button" onClick={() => setOpen(true)}>Operator sign-in</button>;
   }
   return (
     <form

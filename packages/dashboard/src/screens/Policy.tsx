@@ -17,7 +17,7 @@ export function PolicyScreen() {
 
   return (
     <div className="stack">
-      {drift && drift.some((d) => d.status === "open") && <DriftList drift={drift} />}
+      {drift?.some((d) => d.status === "open") && <DriftList drift={drift} />}
 
       <PolicyEditor view={policy} onActivated={refresh} />
 

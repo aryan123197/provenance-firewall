@@ -12,3 +12,4 @@ Run from the repository root with `pnpm <name>`. The ones that talk to PayPal ne
 | `pnpm seed:invoices`, `pnpm demo:invoices` | Create a clean and an injected invoice in the sandbox, then read them back through both agents. Need the Invoicing feature on the app. |
 | `pnpm register:webhook <https-url>` | Registers the webhook endpoint and prints `PAYPAL_WEBHOOK_ID`. |
 | `pnpm gen:audit-key`, `pnpm verify:audit` | Create the audit signing key; verify an exported audit log offline. |
+| `pnpm lint`, `pnpm ui:check`, `pnpm audit:deps` | The CI checks beyond the tests: Biome lint; the built dashboard in a browser for WCAG 2.1 A/AA and sideways scroll; dependency audit. See CONTRIBUTING.md. |

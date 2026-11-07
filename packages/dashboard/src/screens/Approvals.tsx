@@ -66,7 +66,7 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
             {notices.map((n) => (
               <li key={n.id} className={n.ok ? "ok" : "bad"}>
                 <span>{n.text}</span>
-                <button className="link" onClick={() => setNotices((all) => all.filter((x) => x.id !== n.id))} aria-label="Dismiss">Dismiss</button>
+                <button type="button" className="link" onClick={() => setNotices((all) => all.filter((x) => x.id !== n.id))} aria-label="Dismiss">Dismiss</button>
               </li>
             ))}
           </ul>
@@ -159,7 +159,7 @@ function PendingCard({ a, forceOpen, open, onDone, notify }: { a: Approval; forc
           <h3>Pay {amount} to {String(a.intent.payee.value)}</h3>
           <p className="muted small"><strong>{ruleTitle(d.rule)}.</strong> Requested by <code>{a.intent.agentId}</code> · {dateTime(a.requestedAt)}</p>
         </div>
-        <button className="btn" aria-label={`Review: pay ${amount} to ${String(a.intent.payee.value)}`} onClick={() => setAsked(true)}>Review</button>
+        <button type="button" className="btn" aria-label={`Review: pay ${amount} to ${String(a.intent.payee.value)}`} onClick={() => setAsked(true)}>Review</button>
       </article>
     );
   }
@@ -171,7 +171,7 @@ function PendingCard({ a, forceOpen, open, onDone, notify }: { a: Approval; forc
           <p className="eyebrow">Requested by <code>{a.intent.agentId}</code> · {dateTime(a.requestedAt)}</p>
           <h3>Pay {amount} to {String(a.intent.payee.value)}</h3>
         </div>
-        <button className="link" onClick={() => open(`/decision/${encodeURIComponent(a.idempotencyKey)}`)}>Full replay →</button>
+        <button type="button" className="link" onClick={() => open(`/decision/${encodeURIComponent(a.idempotencyKey)}`)}>Full replay →</button>
       </header>
       <p className="held-reason"><strong>{ruleTitle(d.rule)}.</strong> {d.reason}</p>
       <FieldTable fields={d.fields} />
@@ -185,8 +185,8 @@ function PendingCard({ a, forceOpen, open, onDone, notify }: { a: Approval; forc
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. confirmed with the vendor by phone" />
         </label>
         <div className="buttons">
-          <button className="btn danger" disabled={busy !== undefined} onClick={() => act(false)}>{busy === "reject" ? "Rejecting…" : "Reject"}</button>
-          <button className="btn primary" disabled={busy !== undefined} onClick={() => act(true)}>{busy === "approve" ? "Paying…" : `Approve and pay ${amount}`}</button>
+          <button type="button" className="btn danger" disabled={busy !== undefined} onClick={() => act(false)}>{busy === "reject" ? "Rejecting…" : "Reject"}</button>
+          <button type="button" className="btn primary" disabled={busy !== undefined} onClick={() => act(true)}>{busy === "approve" ? "Paying…" : `Approve and pay ${amount}`}</button>
         </div>
       </div>
       {msg && <p className={`result ${msg.ok ? "ok" : "bad"}`} role="status">{msg.text}</p>}

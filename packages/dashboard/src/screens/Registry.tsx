@@ -89,7 +89,7 @@ function VendorsCard({ vendors, onSaved }: { vendors: Vendor[]; onSaved: () => v
                 <td data-label="Name">{v.name}</td>
                 <td className="mono" data-label="Pays into">{v.account}</td>
                 <td data-label="Category">{v.category}</td>
-                <td data-label=""><button className="link" onClick={() => { setForm(v); setAck(false); setMsg(undefined); }}>Edit</button></td>
+                <td data-label=""><button type="button" className="link" onClick={() => { setForm(v); setAck(false); setMsg(undefined); }}>Edit</button></td>
               </tr>
             ))}
           </tbody>
@@ -112,8 +112,8 @@ function VendorsCard({ vendors, onSaved }: { vendors: Vendor[]; onSaved: () => v
       <div className="actions">
         <label className="field"><span>Your name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="you@company.example" autoComplete="name" /></label>
         <div className="buttons">
-          {existing && <button className="btn" onClick={() => { setForm(blank); setAck(false); }}>Cancel edit</button>}
-          <button className="btn primary" onClick={save} disabled={busy || !form.id || !form.name || !form.account || !form.category || (accountChange && !ack)}>
+          {existing && <button type="button" className="btn" onClick={() => { setForm(blank); setAck(false); }}>Cancel edit</button>}
+          <button type="button" className="btn primary" onClick={save} disabled={busy || !form.id || !form.name || !form.account || !form.category || (accountChange && !ack)}>
             {busy ? "Saving…" : existing ? "Save changes" : "Add vendor"}
           </button>
         </div>
@@ -184,7 +184,7 @@ function OrdersCard({ vendors, orders, onSaved }: { vendors: Vendor[]; orders: P
       <div className="actions">
         <label className="field"><span>Your name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="you@company.example" autoComplete="name" /></label>
         <div className="buttons">
-          <button className="btn primary" onClick={save} disabled={busy || !form.id || !form.vendorId || !form.amount}>{busy ? "Adding…" : "Add purchase order"}</button>
+          <button type="button" className="btn primary" onClick={save} disabled={busy || !form.id || !form.vendorId || !form.amount}>{busy ? "Adding…" : "Add purchase order"}</button>
         </div>
       </div>
       {msg && <p className={`result ${msg.ok ? "ok" : "bad"}`} role="status">{msg.text}</p>}

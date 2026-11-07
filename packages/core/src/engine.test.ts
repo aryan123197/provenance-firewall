@@ -234,7 +234,7 @@ describe("policy loading", () => {
   });
   test.each([
     ["unknown key (cannot loosen built-in rules)", base + "allowUntrustedPayee: true\n"],
-    ["missing section", base.replace(/velocity:\n  maxPerHour: 5\n/, "")],
+    ["missing section", base.replace(/velocity:\n {2}maxPerHour: 5\n/, "")],
     ["negative limit", base.replace("perPayment: 100000", "perPayment: -1")],
     ["fractional amount", base.replace("approvalThreshold: 50000", "approvalThreshold: 500.5")],
   ])("rejects %s", (_n, text) => {

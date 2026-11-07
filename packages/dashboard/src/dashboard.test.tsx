@@ -459,6 +459,7 @@ describe("activity grid on small screens", () => {
 });
 
 describe("useNarrow", () => {
+  // biome-ignore lint/correctness/noComponentHookFactories: a probe component local to this test
   function Probe() {
     return <p>{useNarrow(700) ? "narrow" : "wide"}</p>;
   }
