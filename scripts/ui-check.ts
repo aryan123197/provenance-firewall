@@ -15,6 +15,9 @@ import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { chromium } from "playwright";
 
+// The root tsconfig has no DOM library; the browser callback below only touches these two members.
+declare const document: { documentElement: { scrollWidth: number; clientWidth: number } };
+
 const require = createRequire(import.meta.url);
 const axeSource = readFileSync(require.resolve("axe-core/axe.min.js"), "utf8");
 
