@@ -16,7 +16,8 @@ export function activityColumns(narrow: boolean): ColDef<DecisionSummary>[] {
       {
         headerName: "Time",
         field: "createdAt",
-        width: 118,
+        // Wide enough for the widest times ("11:44:44 AM"): 118px clipped them, because digits like 4 are wider than 1.
+        width: 134,
         sort: "desc",
         filter: "agDateColumnFilter",
         comparator: (a: string, b: string) => a.localeCompare(b),
@@ -35,7 +36,7 @@ export function activityColumns(narrow: boolean): ColDef<DecisionSummary>[] {
         headerName: "Payee",
         field: "payee",
         flex: 1.2,
-        minWidth: narrow ? 100 : 230,
+        minWidth: narrow ? 84 : 230,
         // The payee is the key evidence in an attack (the attacker's address), so a long value is readable on hover when it is clipped.
         // On a phone the Time column is gone, so the payee is the link into the decision.
         cellRenderer: (p: ICellRendererParams<DecisionSummary>) =>
@@ -51,15 +52,23 @@ export function activityColumns(narrow: boolean): ColDef<DecisionSummary>[] {
       { headerName: "Source", headerTooltip: "Where the payee came from", field: "payeeTrust", width: 100, filter: "agNumberColumnFilter", cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <TrustChip trust={p.data.payeeTrust} compact /> : null) },
       { headerName: "Outcome", flex: 1, minWidth: 165, valueGetter: (p) => (p.data ? outcome(p.data) : "") },
   ];
-  return all.map((c) => {
+  const mapped = all.map((c) => {
     // Per-column filter buttons crowd the headers on a phone; the search box and the verdict buttons above the grid do the filtering.
-    if (narrow) c = { ...c, suppressHeaderFilterButton: true };
+    if (narrow) c = { ...c, suppressHeaderFilterButton: true, cellStyle: { paddingLeft: "8px", paddingRight: "8px" } };
     if (narrow && ["createdAt", "rule", "payeeTrust"].includes(String(c.field))) return { ...c, hide: true };
     if (narrow && c.headerName === "Outcome") return { ...c, hide: true };
-    if (narrow && c.field === "verdict") return { ...c, width: 124 };
-    if (narrow && c.field === "amount") return { ...c, width: 106 };
+    if (narrow && c.field === "verdict") return { ...c, width: 122 };
+    if (narrow && c.field === "amount") return { ...c, width: 96 };
+    // The grid reserves a strip on the right for its vertical scrollbar but sizes the columns as if it were not there, so the last
+    // column loses its last 16px or so. The payee is the column that can afford that (it is ellipsised anyway), so it goes last with
+    // extra right padding, and the verdict and amount, which must stay exact, are never the clipped ones.
+    if (narrow && c.field === "payee") return { ...c, cellStyle: { paddingLeft: "8px", paddingRight: "24px" } };
     return c;
   });
+  if (!narrow) return mapped;
+  const byField = (f: string) => mapped.find((c) => c.field === f)!;
+  const rest = mapped.filter((c) => !["verdict", "amount", "payee"].includes(String(c.field)));
+  return [byField("verdict"), byField("amount"), byField("payee"), ...rest];
 }
 
 export function Activity({ open, demo, llm, onChange }: { open: (to: string) => void; demo: boolean; llm: boolean; onChange: () => void }) {

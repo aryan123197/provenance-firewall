@@ -182,6 +182,9 @@ input, select {
 .big.bad { color: var(--deny); } .big.good { color: var(--allow); } .big.neutral { color: var(--muted); }
 .payouts, .calls { list-style: none; padding: 0; margin: 0; font-size: 14px; }
 .payouts li, .calls li { padding: 2px 0; }
+/* A payout line is "amount → receiver": when it does not fit, the receiver moves to its own line instead of breaking mid-address. */
+.payouts li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+.payouts code { min-width: 0; overflow-wrap: anywhere; }
 
 /* replay */
 .hero.allow { border-top: 4px solid var(--allow); }
@@ -241,7 +244,8 @@ tbody th { font-weight: 600; white-space: nowrap; }
 .card.drift { border-color: var(--deny); }
 
 @media (max-width: 640px) {
-  .topbar { padding: 10px 14px; gap: 10px; }
+  /* Four rows of brand, tabs and status chips would stay pinned over a quarter of a phone screen: let the header scroll away. */
+  .topbar { padding: 10px 14px; gap: 10px; position: static; }
   /* Four tabs do not fit in one row at 390px: let them wrap rather than push the whole page sideways and clip the last one. */
   nav { flex-wrap: wrap; max-width: 100%; }
   nav a { padding: 8px 10px; white-space: nowrap; }
@@ -258,7 +262,9 @@ tbody th { font-weight: 600; white-space: nowrap; }
 }
 /* The activity grid on a phone: a tighter pill, so "Needs approval" is not clipped next to the payee and amount. */
 @media (max-width: 700px) {
-  .grid-wrap .pill { gap: 4px; font-size: 12px; padding: 2px 7px; }
+  .grid-wrap .pill { gap: 4px; font-size: 11px; padding: 2px 6px; }
+  /* The label already says the verdict in words; the glyph is a second cue the narrow column has no room for. */
+  .grid-wrap .pill .glyph { display: none; }
 }
 
 /* The registry tables on a phone: each row becomes a small card with labelled values, so nothing is squeezed into one-character-wide
