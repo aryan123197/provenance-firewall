@@ -400,8 +400,18 @@ describe("activity grid on small screens", () => {
     expect(shown(false)).toEqual(["Time", "Verdict", "Rule that decided", "Payee", "Amount", "Source", "Outcome"]);
   });
 
+  test("on a phone the visible columns fit a 390px screen, so no value is clipped at the grid's edge", () => {
+    // 390 minus page and card padding leaves about 323px for the grid, and its own vertical scrollbar takes about 15 of those.
+    const total = activityColumns(true).filter((c) => !c.hide).reduce((n, c) => n + (c.width ?? c.minWidth ?? 0), 0);
+    expect(total).toBeLessThanOrEqual(305);
+  });
+
+  test("the time column is wide enough for the widest clock times, which 118px clipped", () => {
+    expect(activityColumns(false).find((c) => c.headerName === "Time")!.width).toBeGreaterThanOrEqual(130);
+  });
+
   test("a phone keeps what identifies the payment (verdict, payee, amount) and drops the rest", () => {
-    expect(shown(true)).toEqual(["Verdict", "Payee", "Amount"]);
+    expect(shown(true)).toEqual(["Verdict", "Amount", "Payee"]); // payee last: see activityColumns for why
   });
 
   const row = { createdAt: "2026-10-28T12:00:00.000Z", idempotencyKey: "k 1", payee: "Acme", amount: 100, currency: "USD", verdict: "require_approval" };
