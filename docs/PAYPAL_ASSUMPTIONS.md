@@ -1,6 +1,15 @@
 # PayPal API assumptions and how to check them
 
-None of the PayPal code has run against the live sandbox. This page lists every assumption the adapter makes, how well each is backed, and what to look at if a real response disagrees. While building I could not reach `developer.paypal.com` (the environment blocks it), so "confirmed" below means a web-search summary of PayPal's own documentation agreed, which is better than memory but not the same as reading the reference or seeing a live response.
+The Payouts, webhook-registration and webhook-verification code has now run against the live PayPal sandbox (2026-11-07); the Invoicing code has not, because the sandbox app does not have Invoicing enabled (see below). Rows marked **Live** were checked against real responses. Everything else is as before: while building I could not reach `developer.paypal.com` (the environment blocks it), so "confirmed" means a web-search summary of PayPal's own documentation agreed, which is better than memory but not the same as reading the reference or seeing a live response.
+
+## What the live sandbox run showed (2026-11-07)
+
+- **Credentials and scopes.** The client-credentials token request answered 200. The token's scopes include Payouts (`https://uri.paypal.com/payments/payouts`) and Webhooks (`…/applications/webhooks`), and **no Invoicing scope**.
+- **A payout works end to end.** `POST /v1/payments/payouts` answered 201 with a `payout_batch_id` and status `PENDING`; a minute later `GET /v1/payments/payouts/{id}` showed `batch_status` and the item `transaction_status` both `SUCCESS`, with our `sender_batch_id`, the receiver and `45.00 USD` as sent. The sandbox also accepted an email address that is not a PayPal account and still marked the item `SUCCESS`.
+- **Reusing a `sender_batch_id` is refused, and the response did not look the way the fake said.** A second submission with the same `sender_batch_id` **and** the same `PayPal-Request-Id` was `400 USER_BUSINESS_ERROR` ("Batch with given sender_batch_id already exists"). The link to the original payout is in **`details[0].link[]`** (an array of link objects), the top-level `links` is empty, and the link's host is `api.sandbox.paypal.com`, not the `api-m` host the client calls. The recovery code only read the top-level `links`, so the first live duplicate ended as a failed payment. It now reads both shapes, takes only the payout id from the link and reads the payout through its own base URL; the live duplicate then came back as the original payout, and the sandbox still showed exactly one payout.
+- **`PayPal-Request-Id` replay was not observed.** The documentation suggests a repeated request id returns the original response; here the same id was rejected as above. The fake's default is now "reject" (what happened), and "replay" is kept as an option.
+- **Webhooks, partly.** Register (12 event types), list and delete all worked, and `verify-webhook-signature` answered a forged event without a `SUCCESS`, so `verify` returned `false`. A real signed event was not delivered, because that needs a public https URL, so the event bodies in the Webhooks table below are still unchecked.
+- **Invoicing is off for this app.** `GET /v2/invoicing/invoices` answered `403 NOT_AUTHORIZED`. To use the invoice scripts, enable the **Invoicing** feature on the app in the PayPal developer dashboard (Apps & Credentials, the app, Features), then rerun them. None of the Invoicing rows below has been checked.
 
 Status: **Confirmed** = agreed by PayPal's documentation as summarised by search. **From memory** = what I believe the API does, unchecked. **Handled** = the code copes with either reading.
 
@@ -9,14 +18,14 @@ Status: **Confirmed** = agreed by PayPal's documentation as summarised by search
 | Assumption | Status | If wrong, look at |
 | --- | --- | --- |
 | `POST /v1/payments/payouts` with `sender_batch_header` (`sender_batch_id`, `email_subject`) and `items[]` (`recipient_type`, `receiver`, `amount.value`, `amount.currency`, `note`, `sender_item_id`) | Confirmed | `PayPalAdapter.propose` |
-| Success is HTTP 201 with `batch_header.payout_batch_id` and `batch_status` `PENDING` | Confirmed | `PayPalAdapter.execute` |
+| Success is HTTP 201 with `batch_header.payout_batch_id` and `batch_status` `PENDING` | **Live** | `PayPalAdapter.execute` |
 | `recipient_type` accepts `EMAIL` and `PAYPAL_ID` | Confirmed (PHONE and USER_HANDLE also exist) | `propose` |
 | A PayPal ID is 13 uppercase letters and digits | From memory | the `PAYPAL_ID` test in `propose`; vendors with an email account are unaffected |
-| `sender_batch_id` is unique for 30 days, and reusing it is **rejected with a link to the original payout** | Confirmed | **Handled**: `originalPayout` follows such a link and accepts it only if that payout's `sender_batch_id` is ours |
-| Sending `PayPal-Request-Id` and reusing it on a retry returns the payout's current state | Confirmed (retention period not found) | **Handled** together with the row above, whichever PayPal applies first |
+| `sender_batch_id` is unique for 30 days, and reusing it is **rejected with a link to the original payout** | **Live**: rejected with 400, link in `details[].link[]` (not top-level `links`) | **Handled**: `originalPayout` reads both shapes and accepts the payout only if its `sender_batch_id` is ours |
+| Sending `PayPal-Request-Id` and reusing it on a retry returns the payout's current state | **Not seen live**: the retry was rejected by `sender_batch_id` instead | **Handled** together with the row above, whichever PayPal applies first |
 | Two simultaneous requests with the same `PayPal-Request-Id`: the second fails | Confirmed; the status code is unknown | we treat HTTP 409 as retryable, so the retry picks up the result |
-| `GET /v1/payments/payouts/{id}` returns `batch_header.batch_status`, `batch_header.sender_batch_header.sender_batch_id` and `items[].transaction_status` | From memory | `status`, `originalPayout` |
-| Status values (`SUCCESS`, `PENDING`, `PROCESSING`, `DENIED`, `CANCELED`; item: `FAILED`, `UNCLAIMED`, `RETURNED`, `HELD`, `BLOCKED`, `REFUNDED`, `REVERSED`) | From memory | `mapPayPalStatus` |
+| `GET /v1/payments/payouts/{id}` returns `batch_header.batch_status`, `batch_header.sender_batch_header.sender_batch_id` and `items[].transaction_status` | **Live** | `status`, `originalPayout` |
+| Status values (`SUCCESS`, `PENDING`, `PROCESSING`, `DENIED`, `CANCELED`; item: `FAILED`, `UNCLAIMED`, `RETURNED`, `HELD`, `BLOCKED`, `REFUNDED`, `REVERSED`) | `PENDING` and `SUCCESS` seen live; the rest from memory | `mapPayPalStatus` |
 | A sandbox business account cannot pay out to its own email | From memory | the sender and `PFW_DEMO_RECEIVER` must be different sandbox accounts |
 
 ## Invoicing (`packages/adapter/src/invoices.ts`)
@@ -36,13 +45,13 @@ Status: **Confirmed** = agreed by PayPal's documentation as summarised by search
 
 | Assumption | Status | If wrong, look at |
 | --- | --- | --- |
-| `POST /v1/notifications/verify-webhook-signature` with `auth_algo`, `cert_url`, `transmission_id`, `transmission_sig`, `transmission_time` (from the matching `PAYPAL-*` headers), `webhook_id` (from your webhook registration) and `webhook_event`, answering `verification_status` `SUCCESS` or `FAILURE` | Confirmed | `PayPalAdapter.verify`. Note the signature covers the **raw** body, which the server keeps |
+| `POST /v1/notifications/verify-webhook-signature` with `auth_algo`, `cert_url`, `transmission_id`, `transmission_sig`, `transmission_time` (from the matching `PAYPAL-*` headers), `webhook_id` (from your webhook registration) and `webhook_event`, answering `verification_status` `SUCCESS` or `FAILURE` | Confirmed; **Live** for a forged event (answered without `SUCCESS`); a genuine signed event was not tested | `PayPalAdapter.verify`. Note the signature covers the **raw** body, which the server keeps |
 | Event names `PAYMENT.PAYOUTSBATCH.*` and `PAYMENT.PAYOUTS-ITEM.*` | Confirmed that both families exist | `PAYOUT_EVENTS` |
 | Batch events carry the batch header only, with no item data | Confirmed | `parsePayPalEvent` reads only `batch_header` for them |
 | Item events' `resource` has `payout_batch_id`, `transaction_status` and `payout_item` (`receiver`, `sender_item_id`, `amount`) | Consistent with PayPal's payout-item details response; the webhook envelope itself was not found | `parsePayPalEvent`. If a real event differs, an item event would fall through as unmatched drift, which is loud rather than silent |
-| `POST /v1/notifications/webhooks` with `url` and `event_types[].name`, https only | From memory (https-only is well known) | `PayPalWebhooks.register` |
+| `POST /v1/notifications/webhooks` with `url` and `event_types[].name`, https only | **Live** (register, list and delete worked); https-only is well known | `PayPalWebhooks.register` |
 
-## First run against the sandbox: what to do and what to watch
+## Running the live checks yourself: what to do and what to watch
 
 Run `pnpm preflight` first. If your machine reaches the internet only through a proxy (some sandboxes and CI runners set `HTTPS_PROXY`), prefix it, `pnpm e2e` and the other live scripts with `NODE_USE_ENV_PROXY=1`: Node's built-in `fetch` ignores `HTTPS_PROXY` otherwise, and the failure looks like a blocked host (`ENOTFOUND`). It reports which variables are missing, whether the sandbox host is reachable from this environment, and whether PayPal accepts the credentials, without printing any secret.
 

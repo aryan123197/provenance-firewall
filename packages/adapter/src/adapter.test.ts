@@ -322,6 +322,70 @@ describe("PayPalHttp error handling", () => {
   });
 });
 
+describe("the duplicate response in the shape the PayPal sandbox really returned", () => {
+  // Captured from the sandbox: a payout submitted a second time with the same sender_batch_id and PayPal-Request-Id is a 400
+  // USER_BUSINESS_ERROR whose link to the original payout is in details[].link (an array), with the top-level links empty.
+  const liveBody = (href: string) => ({
+    name: "USER_BUSINESS_ERROR",
+    message: "User business error.",
+    debug_id: "f73110540f115",
+    information_link: "https://developer.paypal.com/docs/api/payments.payouts-batch/#errors",
+    details: [{ field: "SENDER_BATCH_ID", location: "body", issue: "Batch with given sender_batch_id already exists", link: [{ href, rel: "self", method: "GET", encType: "application/json" }] }],
+    links: [],
+  });
+
+  /** Pays once, then replays the same intent against a PayPal that answers the POST with `body(originalBatchId)`. */
+  async function recover(body: (batchId: string) => unknown) {
+    const fake = createFakePayPal();
+    const mk = (f: typeof fetch) => new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: f });
+    const a = allowed();
+    const original = await mk(fake.fetch).execute(a);
+    const seen: string[] = [];
+    const crafted: typeof fetch = async (input, init) => {
+      seen.push(String(input));
+      if (String(input).endsWith("/v1/payments/payouts") && init?.method === "POST") return new Response(JSON.stringify(body(original.reference)), { status: 400 });
+      return fake.fetch(input, init);
+    };
+    return { original, seen, fake, again: () => mk(crafted).execute(a) };
+  }
+
+  test("the link in details[].link is followed, and the retry is the original payout", async () => {
+    const { original, fake, again } = await recover((id) => liveBody(`https://api.sandbox.paypal.com/v1/payments/payouts/${id}`));
+    const r = await again();
+    expect(r.reference).toBe(original.reference);
+    expect(fake.payouts).toHaveLength(1);
+  });
+
+  test("the payout is read through our own base URL, whatever host the link names", async () => {
+    const { original, seen, again } = await recover((id) => liveBody(`https://evil.example/v1/payments/payouts/${id}`));
+    expect((await again()).reference).toBe(original.reference);
+    expect(seen.some((u) => u.includes("evil.example") || u.includes("api.sandbox.paypal.com"))).toBe(false);
+  });
+
+  test("a bare-string link and the older top-level links shape are read too", async () => {
+    const asString = await recover((id) => ({ ...liveBody(""), details: [{ link: `https://api.sandbox.paypal.com/v1/payments/payouts/${id}` }] }));
+    expect((await asString.again()).reference).toBe(asString.original.reference);
+    const topLevel = await recover((id) => ({ name: "USER_BUSINESS_ERROR", links: [{ href: `http://localhost:9999/v1/payments/payouts/${id}`, rel: "self" }] }));
+    expect((await topLevel.again()).reference).toBe(topLevel.original.reference);
+  });
+
+  test("a link in that shape to a payout with a different sender_batch_id is still a real error", async () => {
+    const fake = createFakePayPal();
+    const mk = (f: typeof fetch) => new PayPalAdapter({ clientId: "test-id", clientSecret: "test-secret", authority, baseUrl: "http://localhost:9999", fetch: f });
+    const someoneElses = await mk(fake.fetch).execute(allowed(intent({ idempotencyKey: "someone-else" })));
+    const crafted: typeof fetch = async (input, init) =>
+      String(input).endsWith("/v1/payments/payouts") && init?.method === "POST" ? new Response(JSON.stringify(liveBody(`https://api.sandbox.paypal.com/v1/payments/payouts/${someoneElses.reference}`)), { status: 400 }) : fake.fetch(input, init);
+    await expect(mk(crafted).execute(allowed(intent({ idempotencyKey: "mine" })))).rejects.toMatchObject({ retryable: false, httpStatus: 400 });
+  });
+
+  test("details with no link at all is a plain error, and malformed details do not throw", async () => {
+    for (const details of [[{ field: "SENDER_BATCH_ID" }], "nonsense", null, [null, 7, { link: 5 }]]) {
+      const { again } = await recover(() => ({ name: "USER_BUSINESS_ERROR", details, links: [] }));
+      await expect(again()).rejects.toMatchObject({ retryable: false, httpStatus: 400 });
+    }
+  });
+});
+
 describe("OAuth tokens under concurrency", () => {
   const tokenCalls = (fake: ReturnType<typeof createFakePayPal>) => fake.calls.filter((c) => c.path === "/v1/oauth2/token").length;
 
