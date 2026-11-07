@@ -14,7 +14,7 @@ const add = (ok: boolean, label: string, hint?: string) => lines.push({ ok, labe
 
 const need = ["PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PFW_DEMO_RECEIVER"];
 for (const k of need) add(Boolean(env(k)), `${k} is set`, "add it as an environment secret, then start a new session");
-add(Boolean(env("ANTHROPIC_API_KEY")), "ANTHROPIC_API_KEY is set (only needed for pnpm harness:llm and the live compiler)", "optional");
+add(Boolean(env("ANTHROPIC_API_KEY") || env("GEMINI_API_KEY") || env("GOOGLE_API_KEY")), "ANTHROPIC_API_KEY or GEMINI_API_KEY is set (only needed for pnpm harness:llm and the live compiler)", "optional");
 
 // Node's built-in fetch does not use HTTPS_PROXY by itself. Where a proxy is the only way out (some sandboxes and CI runners), the lookup
 // fails with ENOTFOUND even though the host is allowed, which looks exactly like a blocked host. Say which it is.

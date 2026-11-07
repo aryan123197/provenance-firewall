@@ -85,7 +85,7 @@ export function PolicyEditor({ view, onActivated }: { view: PolicyView | undefin
         <button type="button" className="btn primary" onClick={compile} disabled={!available || busy !== undefined || !english.trim()}>
           {busy === "compile" ? "Compiling…" : "Compile to rules"}
         </button>
-        {!available && <span className="muted small">Needs a Claude API key (<code>ANTHROPIC_API_KEY</code>) on the server.</span>}
+        {!available && <span className="muted small">Needs an LLM API key (<code>ANTHROPIC_API_KEY</code> or <code>GEMINI_API_KEY</code>) on the server.</span>}
         {available && !english && <button type="button" className="link" onClick={() => setEnglish(EXAMPLE)}>Use an example</button>}
       </div>
       <p className="hint">The model only drafts the rules. It never decides whether a payment moves, and the built-in checks on where a payee or amount came from cannot be changed by any policy.</p>
