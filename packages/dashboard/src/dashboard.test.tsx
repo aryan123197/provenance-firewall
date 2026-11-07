@@ -290,6 +290,19 @@ describe("approval inbox", () => {
     });
   };
 
+  test("a long queue shows the oldest payment open and the rest as one line each", async () => {
+    const many = ["a", "b", "c", "d", "e"].map((x, i) => ({ ...approval, id: `apr_${x}`, idempotencyKey: `k${x}`, intent: { ...approval.intent, payee: { ...fields.payee, value: `Vendor ${x.toUpperCase()}` } }, requestedAt: `2026-10-26T12:0${i}:00.000Z` }));
+    mockApi({ "GET /api/approvals": () => ({ body: { approvals: many } }) });
+    render(<Approvals open={() => {}} onChange={() => {}} />);
+    await screen.findByText("Pay $800.00 to Vendor A");
+    expect(screen.getAllByRole("button", { name: /^Approve and pay/ })).toHaveLength(1);
+    const review = screen.getAllByRole("button", { name: /^Review: pay/ });
+    expect(review).toHaveLength(4);
+    await userEvent.click(review[0]!);
+    expect(screen.getAllByRole("button", { name: /^Approve and pay/ })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /^Review: pay/ })).toHaveLength(3);
+  });
+
   test("shows what is being paid, why it was held and where each field came from", async () => {
     inbox({ body: {} });
     render(<Approvals open={() => {}} onChange={() => {}} />);

@@ -74,8 +74,9 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
           <Empty title="Nothing waiting for you">Payments that need a person land here with the evidence to decide.</Empty>
         ) : (
           <div className="inbox">
-            {pending.map((a) => (
-              <PendingCard key={a.id} a={a} open={open} notify={notify} onDone={() => { void refresh(); onChange(); }} />
+            {pending.length > CROWDED && <p className="muted small">{pending.length} payments are waiting. Only the oldest is open; the rest are one line each. Open one to see its evidence and decide.</p>}
+            {pending.map((a, i) => (
+              <PendingCard key={a.id} a={a} startOpen={pending.length <= CROWDED || i === 0} open={open} notify={notify} onDone={() => { void refresh(); onChange(); }} />
             ))}
           </div>
         )}
@@ -102,7 +103,11 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
   );
 }
 
-function PendingCard({ a, open, onDone, notify }: { a: Approval; open: (to: string) => void; onDone: () => void; notify: (ok: boolean, text: string) => void }) {
+/** Above this many waiting payments the inbox shows one line each, so a long queue stays scannable. */
+const CROWDED = 3;
+
+function PendingCard({ a, startOpen, open, onDone, notify }: { a: Approval; startOpen: boolean; open: (to: string) => void; onDone: () => void; notify: (ok: boolean, text: string) => void }) {
+  const [expanded, setExpanded] = useState(startOpen);
   const [name, setName] = useState(readName);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<"approve" | "reject" | undefined>();
@@ -138,6 +143,18 @@ function PendingCard({ a, open, onDone, notify }: { a: Approval; open: (to: stri
       setBusy(undefined);
     }
   };
+
+  if (!expanded) {
+    return (
+      <article className="pending collapsed">
+        <div>
+          <h3>Pay {amount} to {String(a.intent.payee.value)}</h3>
+          <p className="muted small"><strong>{ruleTitle(d.rule)}.</strong> Requested by <code>{a.intent.agentId}</code> · {dateTime(a.requestedAt)}</p>
+        </div>
+        <button className="btn" aria-expanded="false" aria-label={`Review: pay ${amount} to ${String(a.intent.payee.value)}`} onClick={() => setExpanded(true)}>Review</button>
+      </article>
+    );
+  }
 
   return (
     <article className="pending">

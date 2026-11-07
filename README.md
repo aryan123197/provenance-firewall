@@ -12,6 +12,14 @@ Most agent guardrails only check the final action ("is $450 under the limit?"). 
 
 Read the caveats before quoting these: the agent is a deterministic stand-in that obeys instructions found in documents (not a real LLM), and payments go to an in-process fake of PayPal Payouts. Full table: [reports/scorecard.md](reports/scorecard.md). Threats, mitigations and limits: [THREAT_MODEL.md](THREAT_MODEL.md).
 
+![The same injected invoice: the unprotected agent pays the attacker, the firewalled agent is denied](docs/screenshots/desktop-01-attack-vs-firewall.png)
+
+| Why it was denied: where each field came from | Approving a held payment | On a phone |
+| --- | --- | --- |
+| ![Decision replay](docs/screenshots/desktop-02-decision-replay.png) | ![Approval inbox](docs/screenshots/desktop-03-approval-inbox.png) | ![Live activity on a phone](docs/screenshots/phone-02-activity-grid.png) |
+
+More in [docs/screenshots](docs/screenshots): the vendor registry, the policy and scorecard screen, dark mode, and the dashboard against the real PayPal sandbox.
+
 ## How it works
 
 ```mermaid
@@ -57,7 +65,8 @@ The agent proposes, the firewall decides, and only an allowed intent (or one a p
 | Piece | State |
 | --- | --- |
 | Provenance model, policy engine, idempotency, approvals, signed audit log, reconciliation | Implemented and tested (200+ tests, including property tests over tens of thousands of random intents) |
-| PayPal Payouts and Invoicing adapters | Implemented against PayPal's documented APIs and tested against an in-process fake (including an injected invoice read through the Invoicing client and run through both agents). **Neither has yet been run against the live PayPal sandbox.** [docs/PAYPAL_ASSUMPTIONS.md](docs/PAYPAL_ASSUMPTIONS.md) lists every API assumption, how well each is backed, and a first-run checklist. |
+| PayPal Payouts adapter and webhook verification | **Run against the live PayPal sandbox (2026-11-07)**: payout created and read back, a resubmitted payout resolves to the original, webhook register/list/delete work and a forged event is rejected. That run found one wrong assumption (where PayPal puts the link to the original payout), now fixed. Re-check any time with `pnpm sandbox:check`. A genuinely signed webhook delivery needs a public URL and has not been seen yet. |
+| PayPal Invoicing adapter | Implemented against PayPal's documented API and tested against an in-process fake (including an injected invoice read through the client and run through both agents). **Not run live**: the sandbox app needs the Invoicing feature enabled. [docs/PAYPAL_ASSUMPTIONS.md](docs/PAYPAL_ASSUMPTIONS.md) lists every API assumption, how well each is backed, and what was seen live. |
 | Red-team harness and scorecard | Runs offline. Agent is a deterministic stand-in; payments are an in-process fake. |
 | Dashboard (activity, decision replay, approvals, registry, policy and scorecard) | Implemented. Operator actions need the operator token, entered in the header. |
 | Plain-English policy authoring (compile, diff, generated tests, confirm, versioned in the audit log) | Implemented and tested with a fake model. **Not yet run against the live Claude API.** |
@@ -79,6 +88,7 @@ pnpm harness:llm           # same scenarios with a real Claude agent (needs ANTH
 pnpm seed:invoices         # create a clean and an injected invoice in your PayPal sandbox (needs credentials)
 pnpm demo:invoices <ids>   # read them back and compare the unprotected agent with the firewalled one
 pnpm e2e                   # scripted payment (attack step runs offline; payout step needs sandbox credentials)
+pnpm sandbox:check         # end-to-end check against the real PayPal sandbox: credentials, attack denied, $1 payout, restart-safe retry, webhooks, Invoicing
 ```
 
 ### Plain-English policies

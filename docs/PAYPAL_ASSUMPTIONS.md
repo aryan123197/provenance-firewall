@@ -55,6 +55,7 @@ Status: **Confirmed** = agreed by PayPal's documentation as summarised by search
 
 Run `pnpm preflight` first. If your machine reaches the internet only through a proxy (some sandboxes and CI runners set `HTTPS_PROXY`), prefix it, `pnpm e2e` and the other live scripts with `NODE_USE_ENV_PROXY=1`: Node's built-in `fetch` ignores `HTTPS_PROXY` otherwise, and the failure looks like a blocked host (`ENOTFOUND`). It reports which variables are missing, whether the sandbox host is reachable from this environment, and whether PayPal accepts the credentials, without printing any secret.
 
+0. `pnpm sandbox:check` runs the checks below that can run without a public URL or Invoicing, and prints PASS, FAIL or SKIP for each. It sends one $1.00 sandbox payout.
 1. `pnpm e2e` with the sandbox credentials. Expect one payout and a `pending` status. A 400 here is almost certainly a body-shape mismatch from the Payouts table above; the error text is in the exception.
 2. Run it again without changing anything: the retry must not create a second payout. Check the sandbox activity for exactly one.
 3. `pnpm register:webhook https://<public-host>/api/webhooks/paypal`, set `PAYPAL_WEBHOOK_ID`, restart, then send a test event from the developer dashboard. A rejected signature means a `verify` mismatch.

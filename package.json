@@ -25,6 +25,7 @@
     "demo:invoices": "tsx scripts/demo-invoices.ts",
     "verify:audit": "tsx scripts/verify-audit.ts",
     "register:webhook": "tsx scripts/register-webhook.ts",
+    "sandbox:check": "tsx scripts/sandbox-check.ts",
     "coverage": "vitest run --coverage"
   },
   "devDependencies": {
