@@ -16,13 +16,23 @@ const need = ["PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PFW_DEMO_RECEIVER"];
 for (const k of need) add(Boolean(env(k)), `${k} is set`, "add it as an environment secret, then start a new session");
 add(Boolean(env("ANTHROPIC_API_KEY")), "ANTHROPIC_API_KEY is set (only needed for pnpm harness:llm and the live compiler)", "optional");
 
+// Node's built-in fetch does not use HTTPS_PROXY by itself. Where a proxy is the only way out (some sandboxes and CI runners), the lookup
+// fails with ENOTFOUND even though the host is allowed, which looks exactly like a blocked host. Say which it is.
+const proxyIgnored = Boolean(env("HTTPS_PROXY") || env("https_proxy")) && process.env.NODE_USE_ENV_PROXY !== "1";
+
 let reachable = false;
 try {
   const res = await fetch(`${base}/v1/oauth2/token`, { method: "POST", signal: AbortSignal.timeout(10_000) });
   reachable = true;
   add(true, `${base} is reachable (HTTP ${res.status} without credentials, as expected)`);
 } catch (e) {
-  add(false, `${base} is not reachable: ${(e as Error).cause ?? (e as Error).message}`, "allow this host in the environment's network settings");
+  add(
+    false,
+    `${base} is not reachable: ${(e as Error).cause ?? (e as Error).message}`,
+    proxyIgnored
+      ? "HTTPS_PROXY is set but Node's fetch ignores it unless NODE_USE_ENV_PROXY=1: rerun with that set (also for pnpm e2e and the other live scripts). If it still fails, allow this host in the environment's network settings"
+      : "allow this host in the environment's network settings",
+  );
 }
 
 if (reachable && env("PAYPAL_CLIENT_ID") && env("PAYPAL_CLIENT_SECRET")) {

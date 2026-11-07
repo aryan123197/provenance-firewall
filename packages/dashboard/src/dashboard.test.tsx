@@ -6,6 +6,7 @@ import { OperatorSignIn } from "./App";
 import { activityColumns } from "./screens/Activity";
 import { scorecardColumns } from "./screens/Policy";
 import { useNarrow } from "./hooks";
+import { outcome } from "./labels";
 import { api, operatorToken, type Approval, type CompileResult, type PolicyView } from "./api";
 import { Approvals } from "./screens/Approvals";
 import { PolicyEditor } from "./screens/PolicyEditor";
@@ -290,6 +291,19 @@ describe("approval inbox", () => {
     });
   };
 
+  test("a long queue shows the oldest payment open and the rest as one line each", async () => {
+    const many = ["a", "b", "c", "d", "e"].map((x, i) => ({ ...approval, id: `apr_${x}`, idempotencyKey: `k${x}`, intent: { ...approval.intent, payee: { ...fields.payee, value: `Vendor ${x.toUpperCase()}` } }, requestedAt: `2026-10-26T12:0${i}:00.000Z` }));
+    mockApi({ "GET /api/approvals": () => ({ body: { approvals: many } }) });
+    render(<Approvals open={() => {}} onChange={() => {}} />);
+    await screen.findByText("Pay $800.00 to Vendor A");
+    expect(screen.getAllByRole("button", { name: /^Approve and pay/ })).toHaveLength(1);
+    const review = screen.getAllByRole("button", { name: /^Review: pay/ });
+    expect(review).toHaveLength(4);
+    await userEvent.click(review[0]!);
+    expect(screen.getAllByRole("button", { name: /^Approve and pay/ })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: /^Review: pay/ })).toHaveLength(3);
+  });
+
   test("shows what is being paid, why it was held and where each field came from", async () => {
     inbox({ body: {} });
     render(<Approvals open={() => {}} onChange={() => {}} />);
@@ -397,11 +411,27 @@ describe("activity grid on small screens", () => {
   const shown = (narrow: boolean) => activityColumns(narrow).filter((c) => !c.hide).map((c) => c.headerName);
 
   test("a wide screen shows every column", () => {
-    expect(shown(false)).toEqual(["Time", "Verdict", "Rule that decided", "Payee", "Amount", "Source", "Outcome"]);
+    expect(shown(false)).toEqual(["Time", "Verdict", "Amount", "Rule that decided", "Payee", "Source", "Outcome"]);
+  });
+
+  test("on a phone the visible columns fit a 390px screen, so no value is clipped at the grid's edge", () => {
+    // 390 minus page and card padding leaves about 323px for the grid, and its own vertical scrollbar takes about 15 of those.
+    const total = activityColumns(true).filter((c) => !c.hide).reduce((n, c) => n + (c.width ?? c.minWidth ?? 0), 0);
+    expect(total).toBeLessThanOrEqual(305);
+  });
+
+  test("the amount stays on screen in a window too narrow for every column, because it sits right after the verdict", () => {
+    const wide = activityColumns(false);
+    const before = wide.slice(0, wide.findIndex((c) => c.headerName === "Amount") + 1).reduce((n, c) => n + (c.width ?? c.minWidth ?? 0), 0);
+    expect(before).toBeLessThanOrEqual(480); // fits a 700px window with the page and card padding and the scrollbar strip
+  });
+
+  test("the time column is wide enough for the widest clock times, which 118px clipped", () => {
+    expect(activityColumns(false).find((c) => c.headerName === "Time")!.width).toBeGreaterThanOrEqual(130);
   });
 
   test("a phone keeps what identifies the payment (verdict, payee, amount) and drops the rest", () => {
-    expect(shown(true)).toEqual(["Verdict", "Payee", "Amount"]);
+    expect(shown(true)).toEqual(["Verdict", "Amount", "Payee"]); // payee last: see activityColumns for why
   });
 
   const row = { createdAt: "2026-10-28T12:00:00.000Z", idempotencyKey: "k 1", payee: "Acme", amount: 100, currency: "USD", verdict: "require_approval" };
@@ -429,6 +459,7 @@ describe("activity grid on small screens", () => {
 });
 
 describe("useNarrow", () => {
+  // biome-ignore lint/correctness/noComponentHookFactories: a probe component local to this test
   function Probe() {
     return <p>{useNarrow(700) ? "narrow" : "wide"}</p>;
   }
@@ -511,16 +542,25 @@ describe("close and reconciliation screen", () => {
     const user = userEvent.setup();
     await renderRecon();
     await screen.findByText("More than one payment fits");
-    const buttons = screen.getAllByRole("button", { name: /this line is the payment to Acme Supplies/i });
+    const buttons = screen.getAllByRole("button", { name: /^This is it: the payment to Acme Supplies/ });
     expect(buttons).toHaveLength(2);
     await user.click(buttons[1]!);
     await screen.findByText(/Enter your name so this is attributed to you/);
     expect(calls.some((c) => c.path === "/api/recon/matches")).toBe(false);
     await user.type(screen.getByPlaceholderText("you@company.example"), "dana@company.example");
     await user.type(screen.getByPlaceholderText(/checked against the PayPal statement/), "matched on the statement");
-    await user.click(screen.getAllByRole("button", { name: /this line is the payment to Acme Supplies/i })[1]!);
+    await user.click(screen.getAllByRole("button", { name: /^This is it: the payment to Acme Supplies/ })[1]!);
     await screen.findByText("Match confirmed and recorded.");
     expect(calls.find((c) => c.path === "/api/recon/matches")!.body).toEqual({ bankLineId: "b1", ledgerKey: "k2", resolvedBy: "dana@company.example", note: "matched on the statement" });
+  });
+
+  test("a confirm button's accessible name contains its visible text (WCAG 2.5.3, so voice control can say it)", async () => {
+    mockApi({ "GET /api/recon": { body: view() } });
+    await renderRecon();
+    await screen.findByText("More than one payment fits");
+    const buttons = screen.getAllByRole("button", { name: /^This is it:/ });
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const b of buttons) expect(b.getAttribute("aria-label")).toContain(b.textContent ?? "");
   });
 
   test("a memo is shown as inert text, labelled untrusted", async () => {
@@ -538,16 +578,20 @@ describe("close and reconciliation screen", () => {
     });
     await renderRecon();
     await screen.findByText("Paid to a different account");
-    expect(screen.queryByRole("button", { name: /this line is the payment/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^This is it:/ })).toBeNull();
     expect(screen.getByText(/Confirming cannot clear this/)).toBeTruthy();
   });
 
   test("an adjustment is approved as a named person with their note, and the server's refusal is shown", async () => {
     const adj = { id: "adj_1", itemId: "rc_1", kind: "fee", amount: 25, currency: "USD", evidence: { bankLineId: "b1", ledgerKey: "k1", bankAmount: 45_000, ledgerAmount: 45_000, fee: 25 }, status: "proposed", proposedAt: "2026-11-03T10:00:00Z", resolvedBy: null, resolvedAt: null, note: null };
-    let first = true;
+    let refused = false;
     const calls = mockApi({
       "GET /api/recon": { body: view({ report: { items: [], totals: [] }, adjustments: [adj] }) },
-      "POST /api/recon/adjustments/adj_1/approve": () => (first ? ((first = false), { status: 409, body: { error: "this adjustment no longer applies to the current books" } }) : { body: { ...adj, status: "approved" } }),
+      "POST /api/recon/adjustments/adj_1/approve": () => {
+        if (refused) return { body: { ...adj, status: "approved" } };
+        refused = true;
+        return { status: 409, body: { error: "this adjustment no longer applies to the current books" } };
+      },
     });
     const user = userEvent.setup();
     await renderRecon();
@@ -613,5 +657,20 @@ describe("close and reconciliation screen", () => {
     mockApi({ "GET /api/recon": { body: view({ report: { items: [], totals: [] }, bank: [], ledger: [] }) } });
     await renderRecon();
     await screen.findByText(/Import PayPal's settlement lines, then run reconciliation/);
+  });
+});
+
+describe("how a sent payment is described", () => {
+  const sent = (providerStatus: string | null) => outcome({ verdict: "allow", execution: "executed", providerStatus, approval: null });
+  test("only a confirmed payout says paid, and a payout PayPal is still processing says so", () => {
+    expect(sent("success")).toBe("Paid · PayPal success");
+    expect(sent("pending")).toBe("Sent · PayPal pending");
+    expect(sent("unknown")).toBe("Sent · PayPal unknown");
+    expect(sent(null)).toBe("Sent to PayPal");
+  });
+  test("a payout the recipient has not claimed, or that came back or failed, is not called paid", () => {
+    expect(sent("unclaimed")).toBe("Sent · unclaimed by recipient");
+    expect(sent("returned")).toBe("Returned by recipient");
+    expect(sent("failed")).toBe("Failed at PayPal");
   });
 });

@@ -20,9 +20,10 @@ export interface FakePayout {
 }
 
 export function createFakePayPal(opts: { clientId?: string; clientSecret?: string; duplicates?: "replay" | "reject" } = {}) {
-  // "replay": a repeated PayPal-Request-Id returns the original response. "reject": a reused sender_batch_id is refused with a
-  // link to the original payout, whatever the request id (the strict reading of PayPal's documentation).
-  const duplicates = opts.duplicates ?? "replay";
+  // "reject": a reused sender_batch_id is refused with a link to the original payout, whatever the request id. This is what the sandbox
+  // actually did when a payout was submitted a second time with the same sender_batch_id and the same PayPal-Request-Id, so it is the
+  // default. "replay": a repeated PayPal-Request-Id returns the original response (PayPal's documentation suggests this; it was not seen).
+  const duplicates = opts.duplicates ?? "reject";
   const clientId = opts.clientId ?? "test-id";
   const clientSecret = opts.clientSecret ?? "test-secret";
   const calls: FakeCall[] = [];
@@ -110,7 +111,15 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
         const orig = [...batches.entries()].find(([, b]) => b.senderBatchId === sbi);
         if (orig) {
           if (loseResponse) throw new Error("socket hang up");
-          return json(400, { name: "USER_BUSINESS_ERROR", message: `Duplicate sender_batch_id ${sbi}`, links: [{ href: `${url.origin}/v1/payments/payouts/${orig[0]}`, rel: "self", method: "GET" }] });
+          // The shape the sandbox really returned for a reused sender_batch_id (checked live): the link is inside details[], and links is empty.
+          return json(400, {
+            name: "USER_BUSINESS_ERROR",
+            message: "User business error.",
+            debug_id: "fakedebugid",
+            information_link: "https://developer.paypal.com/docs/api/payments.payouts-batch/#errors",
+            details: [{ field: "SENDER_BATCH_ID", location: "body", issue: "Batch with given sender_batch_id already exists", link: [{ href: `${url.origin}/v1/payments/payouts/${orig[0]}`, rel: "self", method: "GET", encType: "application/json" }] }],
+            links: [],
+          });
         }
       }
       if (duplicates === "replay" && rid && byRequestId.has(rid)) {

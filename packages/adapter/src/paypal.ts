@@ -120,9 +120,23 @@ export class PayPalAdapter implements PaymentAdapter, WebhookVerifier {
    */
   private async originalPayout(e: unknown, senderBatchId: string): Promise<{ id: string; status: string | undefined } | null> {
     if (!(e instanceof AdapterError) || e.httpStatus === undefined || e.httpStatus < 400 || e.httpStatus >= 500) return null;
-    const links = (e.body as { links?: { href?: string }[] } | undefined)?.links ?? [];
-    for (const l of links) {
-      const id = /\/v1\/payments\/payouts\/([A-Za-z0-9]{6,40})(?:[/?#]|$)/.exec(l.href ?? "")?.[1];
+    // Where PayPal puts the link to the original payout, as seen live against the sandbox: `details[].link` is an array of link
+    // objects and the top-level `links` is empty. The top-level shape is still read, in case a response uses it.
+    const hrefs: string[] = [];
+    const take = (x: unknown) => {
+      if (typeof x === "string") hrefs.push(x);
+      else if (x && typeof x === "object" && typeof (x as { href?: unknown }).href === "string") hrefs.push((x as { href: string }).href);
+    };
+    const eb = e.body as { links?: unknown; details?: unknown } | null | undefined;
+    for (const l of Array.isArray(eb?.links) ? eb.links : []) take(l);
+    for (const d of Array.isArray(eb?.details) ? eb.details : []) {
+      const l = (d as { link?: unknown } | null)?.link;
+      if (Array.isArray(l)) l.forEach(take);
+      else take(l);
+    }
+    for (const href of hrefs) {
+      // Only the payout id is taken from the link; the payout is then read through our own base URL, never the host in the link.
+      const id = /\/v1\/payments\/payouts\/([A-Za-z0-9]{6,40})(?:[/?#]|$)/.exec(href)?.[1];
       if (!id) continue;
       const got = (await this.http.request("GET", `/v1/payments/payouts/${id}`)) as { batch_header?: { batch_status?: string; sender_batch_header?: { sender_batch_id?: string } } } | undefined;
       if (got?.batch_header?.sender_batch_header?.sender_batch_id === senderBatchId) return { id, status: got.batch_header.batch_status };

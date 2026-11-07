@@ -68,7 +68,14 @@ export const CATEGORY_LABEL: Record<string, string> = {
 };
 
 export function outcome(d: { verdict: string; execution: string | null; providerStatus: string | null; approval: { status: string } | null }): string {
-  if (d.execution === "executed") return d.providerStatus ? `Paid · PayPal ${d.providerStatus}` : "Sent to PayPal";
+  if (d.execution === "executed") {
+    // "Paid" would be wrong for these: the money has not reached the recipient, or came back.
+    if (d.providerStatus === "unclaimed") return "Sent · unclaimed by recipient";
+    if (d.providerStatus === "returned") return "Returned by recipient";
+    if (d.providerStatus === "failed") return "Failed at PayPal";
+    if (d.providerStatus === "success") return "Paid · PayPal success";
+    return d.providerStatus ? `Sent · PayPal ${d.providerStatus}` : "Sent to PayPal";
+  }
   if (d.execution === "failed") return "Send failed";
   if (d.approval?.status === "rejected") return "Rejected by operator";
   if (d.approval?.status === "pending") return "Waiting for approval";

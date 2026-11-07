@@ -17,6 +17,7 @@ export interface Status {
   policy: { name: string; version: number; hash: string };
   audit: { ok: true; count: number; head: { seq: number; hash: string } | null } | { ok: false; seq: number; reason: string };
   driftOpen: number;
+  payoutsNeedingAttention: number;
   pendingApprovals: number;
   /** Null when reconciliation could not be computed. */
   reconOpen: number | null;

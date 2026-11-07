@@ -50,7 +50,7 @@ describe("read endpoints", () => {
     await firewall.submit(propose(), ctx);
     const r = await app.inject({ url: "/api/status" });
     expect(r.statusCode).toBe(200);
-    expect(r.json()).toMatchObject({ mode: "simulated", policy: { name: "default", version: 1 }, audit: { ok: true }, driftOpen: 0, pendingApprovals: 0 });
+    expect(r.json()).toMatchObject({ mode: "simulated", policy: { name: "default", version: 1 }, audit: { ok: true }, driftOpen: 0, payoutsNeedingAttention: 0, pendingApprovals: 0 });
   });
   test("decisions list and replay record", async () => {
     await firewall.submit(propose(), ctx);

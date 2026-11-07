@@ -45,6 +45,20 @@ export class Firewall {
     return typeof this.cfg.policy === "function" ? this.cfg.policy() : this.cfg.policy;
   }
 
+  /**
+   * Reads the provider's status for sent payouts that have no final one yet. Webhooks need a public URL; this covers a deployment
+   * without one, so an unclaimed or returned payout still shows. One failing lookup is skipped, never thrown.
+   */
+  async refreshPayoutStatuses(): Promise<void> {
+    for (const p of this.cfg.store.payoutsToRefresh()) {
+      try {
+        this.cfg.store.setProviderStatus(p.key, await this.cfg.adapter.status(p.reference));
+      } catch {
+        /* PayPal unreachable or the lookup failed: leave the status as it was; the next poll tries again. */
+      }
+    }
+  }
+
   submit(proposed: unknown, ctx: ProvenanceContext): Promise<Outcome> {
     const resolved = resolveIntent(proposed, ctx);
     if (!resolved.ok) return Promise.resolve({ status: "invalid", errors: resolved.errors });

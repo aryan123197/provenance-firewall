@@ -18,6 +18,7 @@ Provenance Firewall is a policy layer between an LLM agent and PayPal that track
 - A signed, hash-chained audit log of every decision, including denials, that anyone can export and verify offline.
 - Reconciliation: PayPal webhooks are signature-checked and matched against what was authorized; anything PayPal did that we did not authorize shows up as drift.
 - A red-team harness: 26 scenarios run against an unprotected baseline and the firewalled agent, with a committed scorecard that includes the false-block rate.
+- A Slack input: mention the app with a scenario id and the same run happens against the live firewall, with the verdicts posted in the thread (approving a held payment stays in the dashboard). **[fill after live run: tested only against a stubbed Slack API so far; try it in a real workspace before you claim it]**
 - An operator dashboard: live activity, a decision-replay screen that shows each field's source, an approval inbox, a vendor registry, and policy and scorecard. Policies can be written in plain English; a model drafts a patch, and it activates only after generated tests pass and a person confirms.
 
 **Where PayPal is used**
@@ -54,7 +55,7 @@ Use demo mode (`pnpm dev:demo`, or the Render URL) and click through in this ord
 | --- | --- | --- |
 | 0:00 to 0:15 | Live activity, empty | "Agents can pay for things now. Here is how that goes wrong." |
 | 0:15 to 1:05 | **Try an attack** → *Invoice note redirects payment* → Run it. Left pane: unprotected agent, **Lost $450.00**, receiver `vendor-support@evil.example`. Right pane: same agent, **Denied · Payee changed**, no money moved. | "Same agent, same invoice. The unprotected one pays the attacker. Behind the firewall it is denied." |
-| 1:05 to 1:30 | Click the denied link → **decision replay**: the field table, payee and account in red as untrusted, the sentence "came from the invoice text, which is untrusted", the rule list, then the audit trail with "Chain verified". | "It tracks where every field came from, so persuasion cannot change the outcome." |
+| 1:05 to 1:30 | Click the denied link → the decision page, **Where each field came from**: the field table, payee and account in red as untrusted, the sentence "Payee came from the invoice text, which is untrusted content", the rule list, then the audit trail with "Chain verified". | "It tracks where every field came from, so persuasion cannot change the outcome." |
 | 1:30 to 1:55 | Run *Large invoice that needs a person* → **Approvals** → type a name → **Approve and pay $800.00** → the green confirmation. | "Real work still gets done: a person approves, once, bound to this exact payment." |
 | 1:55 to 2:20 | **Policy & scorecard** → type the example sentence → Compile → show the diff, any lint warning and the "tests passed" line → Confirm. *(needs a Claude key; if you have none, skip this row and say so)* **[fill after live run]** | "Policies are written in English, compiled to rules, tested, and only activated when you confirm." |
 | 2:20 to 2:45 | Scorecard: the bars and the table. Point at the one scenario where the firewalled side still loses $800. | "Twenty attacks: the unprotected agent lost money in all of them. The firewall in one, bounded by a daily cap. Zero legitimate payments wrongly denied." |
@@ -74,6 +75,16 @@ Rehearse once with a timer. Do not claim live PayPal in the video unless you hav
 | Text description covering features, PayPal use, LLM use | Draft above |
 | Demo video, YouTube, under 3 minutes | Yours to record; script above |
 | Registered on Devpost; submit before the deadline and confirm it shows as submitted, not draft | Yours |
+
+## Deploying on Render
+
+The blueprint (`render.yaml`) builds with `pnpm install --frozen-lockfile && pnpm build` and starts with `pnpm start`; both were run from a clean clone of `main` and worked. In order:
+
+1. New **Blueprint** on Render, pointed at this repo. It reads `render.yaml` and sets `DEMO_MODE`, `OPEN_OPERATOR`, `TRUST_PROXY` and a generated `AUTHORITY_KEY`.
+2. Set `AUDIT_SIGNING_KEY` to the output of `pnpm gen:audit-key`. Without it, every restart signs new audit entries with a new key: the log still verifies (the export carries every key), but a stable key is easier to explain.
+3. Optional, in the Render environment settings: `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` switch the server from simulated to the PayPal sandbox; `PAYPAL_WEBHOOK_ID` (from `pnpm register:webhook`) turns on webhook reconciliation; `ANTHROPIC_API_KEY` enables the plain-English policy editor and the live Claude agent; `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN` and, with PayPal credentials, `SLACK_ALLOWED_USERS` enable the Slack input.
+4. Open the URL and check `/api/status`: it should show your mode (*simulated* or *sandbox*), the audit chain as valid, and `compilerAvailable` / `llmAgentAvailable` matching the keys you set.
+5. The free plan sleeps when idle and the database lives in `/tmp`, so history is lost on a restart and the first request after a sleep is slow. Open the page a minute before you record, and run each scenario once to warm it up.
 
 ## Before you submit
 
