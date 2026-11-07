@@ -103,7 +103,7 @@ export function Recon({ onChange }: { onChange: () => void }) {
             {notices.map((n) => (
               <li key={n.id} className={n.ok ? "ok" : "bad"}>
                 <span>{n.text}</span>
-                <button className="link" onClick={() => setNotices((all) => all.filter((x) => x.id !== n.id))} aria-label="Dismiss">Dismiss</button>
+                <button type="button" className="link" onClick={() => setNotices((all) => all.filter((x) => x.id !== n.id))} aria-label="Dismiss">Dismiss</button>
               </li>
             ))}
           </ul>
@@ -115,8 +115,8 @@ export function Recon({ onChange }: { onChange: () => void }) {
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="you@company.example" autoComplete="name" />
           </label>
           <div className="buttons">
-            <button className="btn" onClick={() => setImporting((v) => !v)} aria-expanded={importing}>Import settlement lines</button>
-            <button className="btn primary" disabled={busy} onClick={() => act("Reconciliation run recorded in the audit log.", (who) => api.reconRun(who))}>Run reconciliation</button>
+            <button type="button" className="btn" onClick={() => setImporting((v) => !v)} aria-expanded={importing}>Import settlement lines</button>
+            <button type="button" className="btn primary" disabled={busy} onClick={() => act("Reconciliation run recorded in the audit log.", (who) => api.reconRun(who))}>Run reconciliation</button>
           </div>
         </div>
         {importing && (
@@ -126,7 +126,7 @@ export function Recon({ onChange }: { onChange: () => void }) {
               <textarea value={json} onChange={(e) => setJson(e.target.value)} spellCheck={false} placeholder={'[{"id":"bl_1","reference":"PAYOUT-ITEM-ID","amount":45000,"currency":"USD","date":"2026-11-03T10:00:00Z","receiver":"ap@vendor.example","fee":25}]'} />
             </label>
             <div className="buttons">
-              <button className="btn primary" disabled={busy || !json.trim()} onClick={() => void submitImport()}>Import</button>
+              <button type="button" className="btn primary" disabled={busy || !json.trim()} onClick={() => void submitImport()}>Import</button>
             </div>
           </div>
         )}
@@ -258,7 +258,7 @@ function QueueItem({ item, bank, ledger, unsettled, busy, onConfirm }: { item: R
               {offered.map((k) => (
                 <li key={k}>
                   <span>{paymentLabel(ledger.get(k)!)}</span>
-                  <button className="btn" disabled={busy} onClick={() => onConfirm(k, note)} aria-label={`This line is the payment to ${ledger.get(k)!.payee} for ${money(ledger.get(k)!.amount, ledger.get(k)!.currency)}`}>This is it</button>
+                  <button type="button" className="btn" disabled={busy} onClick={() => onConfirm(k, note)} aria-label={`This is it: the payment to ${ledger.get(k)!.payee} for ${money(ledger.get(k)!.amount, ledger.get(k)!.currency)}`}>This is it</button>
                 </li>
               ))}
             </ul>
@@ -286,8 +286,8 @@ function AdjustmentCard({ a, busy, onResolve }: { a: AdjustmentRecord; busy: boo
           <h3>{adjustmentTitle(a)} {money(Math.abs(a.amount), a.currency)}</h3>
         </div>
         <div className="buttons">
-          <button className="btn danger" disabled={busy} onClick={() => onResolve(false, note)}>Reject</button>
-          <button className="btn primary" disabled={busy} onClick={() => onResolve(true, note)}>Approve {money(Math.abs(a.amount), a.currency)}</button>
+          <button type="button" className="btn danger" disabled={busy} onClick={() => onResolve(false, note)}>Reject</button>
+          <button type="button" className="btn primary" disabled={busy} onClick={() => onResolve(true, note)}>Approve {money(Math.abs(a.amount), a.currency)}</button>
         </div>
       </header>
       <dl className="qmeta">
