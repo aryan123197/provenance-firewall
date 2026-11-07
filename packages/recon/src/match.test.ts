@@ -110,12 +110,12 @@ describe("the memo is never read", () => {
 describe("purchase orders", () => {
   it("links through the recorded purchase order", () => {
     const r = run([bk({ id: "b1", reference: "R" })], [led({ key: "k1", reference: "R", poId: "po1" })], [po({ id: "po1" })]);
-    expect(item(r, "b1").invoice).toEqual({ status: "linked", poId: "po1" });
+    expect(item(r, "b1").invoice).toEqual({ status: "linked", poId: "po1", poAmount: 10_000 });
   });
 
   it("falls back to a unique closed purchase order for the vendor and amount", () => {
     const r = run([bk({ id: "b1", reference: "R" })], [led({ key: "k1", reference: "R" })], [po({ id: "po1" }), po({ id: "po2", amount: 5 }), po({ id: "po3", status: "open" })]);
-    expect(item(r, "b1").invoice).toEqual({ status: "linked", poId: "po1" });
+    expect(item(r, "b1").invoice).toEqual({ status: "linked", poId: "po1", poAmount: 10_000 });
   });
 
   it("sends a payment with several fitting purchase orders to a person", () => {
@@ -123,9 +123,21 @@ describe("purchase orders", () => {
     expect(item(r, "b1")).toMatchObject({ status: "ambiguous", reason: "invoice_ambiguous", candidates: ["po1", "po2"] });
   });
 
-  it("sends a payment whose recorded purchase order disagrees to a person", () => {
-    const r = run([bk({ id: "b1", reference: "R" })], [led({ key: "k1", reference: "R", poId: "po1" })], [po({ id: "po1", amount: 12_345 })]);
-    expect(item(r, "b1")).toMatchObject({ status: "ambiguous", reason: "invoice_mismatch" });
+  it("links a payment to its recorded purchase order even when the amount differs: the firewall already allowed that within its tolerance", () => {
+    const r = run([bk({ id: "b1", reference: "R", amount: 46_200 })], [led({ key: "k1", reference: "R", amount: 46_200, poId: "po1" })], [po({ id: "po1", amount: 45_000 })]);
+    expect(item(r, "b1")).toMatchObject({ status: "matched", invoice: { status: "linked", poId: "po1", poAmount: 45_000 } });
+  });
+
+  it("sends a payment to a person when its recorded purchase order is missing or in another currency", () => {
+    const missing = run([bk({ id: "b1", reference: "R" })], [led({ key: "k1", reference: "R", poId: "po9" })], [po({ id: "po1" })]);
+    expect(item(missing, "b1")).toMatchObject({ status: "ambiguous", reason: "invoice_mismatch" });
+    const currency = run([bk({ id: "b1", reference: "R" })], [led({ key: "k1", reference: "R", poId: "po1" })], [po({ id: "po1", currency: "EUR" })]);
+    expect(item(currency, "b1")).toMatchObject({ status: "ambiguous", reason: "invoice_mismatch" });
+  });
+
+  it("still insists on an exact amount when it has to guess the purchase order (no recorded link)", () => {
+    const r = run([bk({ id: "b1", reference: "R", amount: 46_200 })], [led({ key: "k1", reference: "R", amount: 46_200 })], [po({ id: "po1", amount: 45_000 })]);
+    expect(item(r, "b1")).toMatchObject({ status: "matched", invoice: { status: "none" } });
   });
 
   it("treats a payment with no purchase order as matched with no invoice", () => {

@@ -287,3 +287,27 @@ describe("the ledger", () => {
     expect(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'audit_log_type'").get()).toBeTruthy();
   });
 });
+
+describe("a payment the firewall allowed within its purchase-order tolerance", () => {
+  test("goes all the way through: matches the bank, links its purchase order, and an approved difference clears it", () => {
+    store.addPurchaseOrder({ id: "po1", vendorId: "acme", amount: 4500, currency: "USD" });
+    // 4,620 against a 4,500 purchase order is inside the policy's 5% tolerance, so the firewall allows it.
+    const r = store.decide({ ...intent("t", 4620), amount: f("invoice", 4620) }, policy);
+    expect(r.decision.verdict).toBe("allow");
+    store.saveExecution("t", { state: "executed", retryable: false, payload: {}, reference: "PP-t", requestId: "req-t" });
+    expect(recon.ledger()[0]).toMatchObject({ amount: 4620, poId: "po1" });
+
+    recon.importBankLines([line("t", { reference: "PP-t", amount: 4620 })], "ops");
+    expect(recon.run("ops").report.items[0]).toMatchObject({ status: "matched", invoice: { status: "linked", poId: "po1", poAmount: 4500 } });
+
+    // And with a small settlement difference on top, approving it must leave the item matched, not stuck on the purchase order.
+    recon.importBankLines([line("u", { reference: "PP-u", amount: 4610 })], "ops");
+    store.addPurchaseOrder({ id: "po2", vendorId: "acme", amount: 4510, currency: "USD" }); // po1 is closed: a purchase order covers one payment
+    expect(store.decide({ ...intent("u", 4620), amount: f("invoice", 4620) }, policy).decision.verdict).toBe("allow");
+    store.saveExecution("u", { state: "executed", retryable: false, payload: {}, reference: "PP-u", requestId: "req-u" });
+    const first = recon.run("ops");
+    expect(first.report.items.find((i) => i.bankLineId === "u")).toMatchObject({ status: "ambiguous", reason: "amount_difference" });
+    recon.resolveAdjustment(first.proposed.find((a) => a.kind === "difference")!.id, { approver: "cfo@co", approve: true });
+    expect(recon.report().items.find((i) => i.bankLineId === "u")?.status).toBe("matched");
+  });
+});

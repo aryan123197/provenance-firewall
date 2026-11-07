@@ -52,13 +52,15 @@ function validate(input: ReconInput): void {
 
 function linkInvoice(l: LedgerEntry, pos: readonly PurchaseOrderLine[]): InvoiceLink {
   if (l.poId) {
+    // The audit log says which purchase order this payment closed. The firewall already enforced its amount tolerance
+    // when it allowed the payment, so the amounts may differ; only a missing purchase order or another currency is wrong.
     const po = pos.find((p) => p.id === l.poId);
-    if (!po || po.amount !== l.amount || po.currency !== l.currency) return { status: "mismatch", poId: l.poId };
-    return { status: "linked", poId: po.id };
+    if (!po || po.currency !== l.currency) return { status: "mismatch", poId: l.poId };
+    return { status: "linked", poId: po.id, poAmount: po.amount };
   }
   if (!l.vendorId) return { status: "none" };
   const c = pos.filter((p) => p.vendorId === l.vendorId && p.amount === l.amount && p.currency === l.currency && p.status === "closed").map((p) => p.id);
-  if (c.length === 1) return { status: "linked", poId: c[0]! };
+  if (c.length === 1) return { status: "linked", poId: c[0]!, poAmount: l.amount };
   if (c.length > 1) return { status: "ambiguous", candidates: c.sort() };
   return { status: "none" };
 }

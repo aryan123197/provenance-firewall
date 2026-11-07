@@ -91,6 +91,8 @@ export const CONFIRMABLE_REASONS: readonly ReasonCode[] = ["reference_unknown", 
 export interface InvoiceLink {
   status: "linked" | "none" | "ambiguous" | "mismatch";
   poId?: string;
+  /** The purchase order's amount, so a payment the firewall allowed within its tolerance shows both numbers. */
+  poAmount?: number;
   candidates?: string[];
 }
 

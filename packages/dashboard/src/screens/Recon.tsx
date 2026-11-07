@@ -306,7 +306,16 @@ function MatchedGrid({ items, bank, ledger }: { items: ReconItem[]; bank: Map<st
       { headerName: "Payee", valueGetter: (p) => ledger.get(p.data?.ledgerKey ?? "")?.payee ?? "", flex: 1, minWidth: 150 },
       { headerName: "Amount", field: "amount", type: "rightAligned", width: 130, valueFormatter: (p) => money(p.value as number, p.data?.currency) },
       { headerName: "How", field: "reason", width: 220, valueFormatter: (p) => reconReason(p.value as string) },
-      { headerName: "Purchase order", valueGetter: (p) => p.data?.invoice.poId ?? (p.data?.invoice.status === "none" ? "none" : ""), width: 150 },
+      {
+        headerName: "Purchase order",
+        width: 270,
+        valueGetter: (p) => {
+          const inv = p.data?.invoice;
+          if (!inv || inv.status === "none") return "none";
+          // A payment allowed within the policy's tolerance differs from its purchase order: show both numbers.
+          return inv.poAmount !== undefined && inv.poAmount !== p.data?.amount ? `${inv.poId} (PO ${money(inv.poAmount, p.data?.currency)})` : (inv.poId ?? "");
+        },
+      },
       { headerName: "Settled", valueGetter: (p) => bank.get(p.data?.bankLineId ?? "")?.date ?? "", width: 190, valueFormatter: (p) => (p.value ? dateTime(p.value as string) : "") },
     ],
     [bank, ledger],
