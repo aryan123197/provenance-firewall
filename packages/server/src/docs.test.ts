@@ -99,3 +99,25 @@ describe("headline numbers", () => {
     for (const row of rows) for (const m of row.matchAll(/\$\d(?:[\d,]*\d)?/g)) expect([usd(card.attacks.baselineAmount), usd(card.attacks.firewalledAmount)]).toContain(m[0]);
   });
 });
+
+describe("the video shot list", () => {
+  const source = walk(join(root, "packages")).filter((p) => /\.(ts|tsx)$/.test(p) && !/\.test\.tsx?$/.test(p)).map((p) => readFileSync(p, "utf8")).join("\n");
+
+  test("every bold label it tells you to look for or click exists in the dashboard or the scenarios", () => {
+    const table = read("docs/SUBMISSION.md").split("\n").filter((l) => /^\| \d:\d\d to /.test(l));
+    expect(table.length).toBeGreaterThan(4);
+    const missing: string[] = [];
+    for (const row of table) {
+      const onScreen = row.split("|")[2] ?? "";
+      for (const m of onScreen.matchAll(/\*\*([^*]+)\*\*/g)) {
+        if (m[1]!.startsWith("[fill")) continue; // a marker for the author, not something on screen
+        // Amounts in a label are filled in at run time; check the fixed words on either side.
+        for (const part of m[1]!.split(/\s·\s/).flatMap((x) => x.split(/\$[\d,.]+/))) {
+          const word = part.trim();
+          if (word.length > 2 && !source.toLowerCase().includes(word.toLowerCase())) missing.push(word);
+        }
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+});
