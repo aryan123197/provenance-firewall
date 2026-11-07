@@ -25,16 +25,23 @@
     "demo:invoices": "tsx scripts/demo-invoices.ts",
     "verify:audit": "tsx scripts/verify-audit.ts",
     "register:webhook": "tsx scripts/register-webhook.ts",
-    "coverage": "vitest run --coverage"
+    "sandbox:check": "tsx scripts/sandbox-check.ts",
+    "coverage": "vitest run --coverage",
+    "lint": "biome lint",
+    "ui:check": "tsx scripts/ui-check.ts",
+    "audit:deps": "pnpm audit --audit-level=high"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.6",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.8",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.5",
     "@vitest/coverage-v8": "^5.0.5",
+    "axe-core": "^4.14.0",
     "fast-check": "^4.10.2",
     "jsdom": "^30.1.3",
+    "playwright": "1.63.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   },

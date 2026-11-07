@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+
 import { beforeEach, describe, expect, test } from "vitest";
 import type { PolicyDoc } from "@pfw/core";
 import type { Agent } from "@pfw/harness";
@@ -40,7 +40,10 @@ const build = (extra: Partial<Parameters<typeof buildServer>[0]> = {}, withCompi
     trustProxy: false,
     demo: false,
     llm: null,
-    ...(withCompiler ? { compiler: { compile: async (english, active) => (calls.push({ english, active }), output) } satisfies PolicyCompiler } : {}),
+    ...(withCompiler ? { compiler: { compile: async (english, active) => {
+          calls.push({ english, active });
+          return output;
+        } } satisfies PolicyCompiler } : {}),
     ...extra,
   });
 

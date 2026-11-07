@@ -3,7 +3,7 @@
  *
  * Registers your firewall's webhook endpoint with the PayPal sandbox for the payout events reconciliation uses, and prints the
  * id to set as PAYPAL_WEBHOOK_ID (the server needs it to verify event signatures). PayPal only delivers to public https URLs.
- * Not yet run against the live sandbox.
+ * Register, list and delete have been run against the live sandbox (see docs/PAYPAL_ASSUMPTIONS.md).
  */
 import { PayPalWebhooks } from "@pfw/adapter";
 

@@ -1,6 +1,6 @@
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef } from "ag-grid-community";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type Approval } from "../api";
 import { Card, Empty, ErrorNote, FieldTable } from "../components/ui";
 import { usePoll } from "../hooks";
@@ -29,6 +29,7 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
   const [notices, setNotices] = useState<Notice[]>([]);
   const notify = (ok: boolean, text: string) => setNotices((n) => [{ id: ++noticeSeq, ok, text }, ...n].slice(0, 5));
   const pending = (data ?? []).filter((a) => a.status === "pending");
+  const crowded = pending.length > CROWDED;
   const history = (data ?? []).filter((a) => a.status !== "pending");
 
   const cols = useMemo<ColDef<Approval>[]>(
@@ -65,7 +66,7 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
             {notices.map((n) => (
               <li key={n.id} className={n.ok ? "ok" : "bad"}>
                 <span>{n.text}</span>
-                <button className="link" onClick={() => setNotices((all) => all.filter((x) => x.id !== n.id))} aria-label="Dismiss">Dismiss</button>
+                <button type="button" className="link" onClick={() => setNotices((all) => all.filter((x) => x.id !== n.id))} aria-label="Dismiss">Dismiss</button>
               </li>
             ))}
           </ul>
@@ -74,8 +75,9 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
           <Empty title="Nothing waiting for you">Payments that need a person land here with the evidence to decide.</Empty>
         ) : (
           <div className="inbox">
-            {pending.map((a) => (
-              <PendingCard key={a.id} a={a} open={open} notify={notify} onDone={() => { void refresh(); onChange(); }} />
+            {crowded && <p className="muted small">{pending.length} payments are waiting, oldest first; the rest are one line each. Open one to see its evidence and decide.</p>}
+            {pending.map((a, i) => (
+              <PendingCard key={a.id} a={a} forceOpen={!crowded || i === 0} open={open} notify={notify} onDone={() => { void refresh(); onChange(); }} />
             ))}
           </div>
         )}
@@ -102,7 +104,18 @@ export function Approvals({ open, onChange }: { open: (to: string) => void; onCh
   );
 }
 
-function PendingCard({ a, open, onDone, notify }: { a: Approval; open: (to: string) => void; onDone: () => void; notify: (ok: boolean, text: string) => void }) {
+/** Above this many waiting payments the inbox shows one line each, so a long queue stays scannable. */
+const CROWDED = 3;
+
+function PendingCard({ a, forceOpen, open, onDone, notify }: { a: Approval; forceOpen: boolean; open: (to: string) => void; onDone: () => void; notify: (ok: boolean, text: string) => void }) {
+  // The oldest payment (or every payment, in a short queue) is always open; the others open when the operator asks.
+  const [asked, setAsked] = useState(false);
+  const expanded = forceOpen || asked;
+  // Opening replaces the button that was pressed, so move focus to the opened card instead of dropping it on the page.
+  const card = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (asked) card.current?.focus();
+  }, [asked]);
   const [name, setName] = useState(readName);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState<"approve" | "reject" | undefined>();
@@ -139,14 +152,26 @@ function PendingCard({ a, open, onDone, notify }: { a: Approval; open: (to: stri
     }
   };
 
+  if (!expanded) {
+    return (
+      <article className="pending collapsed">
+        <div>
+          <h3>Pay {amount} to {String(a.intent.payee.value)}</h3>
+          <p className="muted small"><strong>{ruleTitle(d.rule)}.</strong> Requested by <code>{a.intent.agentId}</code> · {dateTime(a.requestedAt)}</p>
+        </div>
+        <button type="button" className="btn" aria-label={`Review: pay ${amount} to ${String(a.intent.payee.value)}`} onClick={() => setAsked(true)}>Review</button>
+      </article>
+    );
+  }
+
   return (
-    <article className="pending">
+    <article className="pending" ref={card} tabIndex={-1}>
       <header>
         <div>
           <p className="eyebrow">Requested by <code>{a.intent.agentId}</code> · {dateTime(a.requestedAt)}</p>
           <h3>Pay {amount} to {String(a.intent.payee.value)}</h3>
         </div>
-        <button className="link" onClick={() => open(`/decision/${encodeURIComponent(a.idempotencyKey)}`)}>Full replay →</button>
+        <button type="button" className="link" onClick={() => open(`/decision/${encodeURIComponent(a.idempotencyKey)}`)}>Full replay →</button>
       </header>
       <p className="held-reason"><strong>{ruleTitle(d.rule)}.</strong> {d.reason}</p>
       <FieldTable fields={d.fields} />
@@ -160,8 +185,8 @@ function PendingCard({ a, open, onDone, notify }: { a: Approval; open: (to: stri
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. confirmed with the vendor by phone" />
         </label>
         <div className="buttons">
-          <button className="btn danger" disabled={busy !== undefined} onClick={() => act(false)}>{busy === "reject" ? "Rejecting…" : "Reject"}</button>
-          <button className="btn primary" disabled={busy !== undefined} onClick={() => act(true)}>{busy === "approve" ? "Paying…" : `Approve and pay ${amount}`}</button>
+          <button type="button" className="btn danger" disabled={busy !== undefined} onClick={() => act(false)}>{busy === "reject" ? "Rejecting…" : "Reject"}</button>
+          <button type="button" className="btn primary" disabled={busy !== undefined} onClick={() => act(true)}>{busy === "approve" ? "Paying…" : `Approve and pay ${amount}`}</button>
         </div>
       </div>
       {msg && <p className={`result ${msg.ok ? "ok" : "bad"}`} role="status">{msg.text}</p>}

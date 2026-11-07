@@ -10,6 +10,8 @@ import { gridTheme } from "../theme";
 /**
  * The activity grid's columns. On a narrow screen only what identifies a payment stays (verdict, payee, amount): the time, the rule,
  * the payee's source and the outcome are all on the decision page one tap away, and cramming them in leaves the payee off screen.
+ * On a wide screen the amount sits right after the verdict: between a phone and about 1230px the grid scrolls sideways, and the
+ * money should be on screen while the rule, payee and outcome are what scroll.
  */
 export function activityColumns(narrow: boolean): ColDef<DecisionSummary>[] {
   const all: ColDef<DecisionSummary>[] = [
@@ -31,6 +33,7 @@ export function activityColumns(narrow: boolean): ColDef<DecisionSummary>[] {
           ) : null,
       },
       { headerName: "Verdict", field: "verdict", width: 164, cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <VerdictPill verdict={p.data.verdict} /> : null) },
+      { headerName: "Amount", field: "amount", width: 130, type: "rightAligned", filter: "agNumberColumnFilter", valueFormatter: (p) => money(p.value as number, p.data?.currency) },
       { headerName: "Rule that decided", field: "rule", flex: 1.3, minWidth: 225, valueFormatter: (p) => ruleTitle(p.value as string), cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <span>{ruleTitle(p.data.rule)}{p.data.alert && <span className="alert-dot" title="Raised an alert"> ⚑</span>}</span> : null) },
       {
         headerName: "Payee",
@@ -48,7 +51,6 @@ export function activityColumns(narrow: boolean): ColDef<DecisionSummary>[] {
             <span title={p.data.payee}>{p.data.payee}</span>
           ),
       },
-      { headerName: "Amount", field: "amount", width: 130, type: "rightAligned", filter: "agNumberColumnFilter", valueFormatter: (p) => money(p.value as number, p.data?.currency) },
       { headerName: "Source", headerTooltip: "Where the payee came from", field: "payeeTrust", width: 100, filter: "agNumberColumnFilter", cellRenderer: (p: ICellRendererParams<DecisionSummary>) => (p.data ? <TrustChip trust={p.data.payeeTrust} compact /> : null) },
       { headerName: "Outcome", flex: 1, minWidth: 165, valueGetter: (p) => (p.data ? outcome(p.data) : "") },
   ];
@@ -91,7 +93,7 @@ export function Activity({ open, demo, llm, onChange }: { open: (to: string) => 
           <div className="toolbar">
             <div className="segmented" role="group" aria-label="Filter by verdict">
               {(["all", "allow", "require_approval", "deny"] as const).map((v) => (
-                <button key={v} aria-pressed={verdict === v} onClick={() => setVerdict(v)}>
+                <button type="button" key={v} aria-pressed={verdict === v} onClick={() => setVerdict(v)}>
                   {v === "all" ? "All" : v === "allow" ? "Allowed" : v === "deny" ? "Denied" : "Needs approval"}
                 </button>
               ))}
@@ -102,6 +104,7 @@ export function Activity({ open, demo, llm, onChange }: { open: (to: string) => 
       >
         {error && <ErrorNote message={error} />}
         {rows.length > 0 && (
+          // biome-ignore lint/a11y/useValidAnchor: a skip link; the href is the fallback and the click handler moves focus into the grid
           <a
             className="skip-inline"
             href="#decisions"
@@ -175,7 +178,7 @@ function DemoRunner({ open, onRan, llm }: { open: (to: string) => void; onRan: (
     <Card
       title="Try an attack"
       aside={
-        <button
+        <button type="button"
           className="btn subtle"
           onClick={async () => {
             await api.resetDemo();
@@ -202,11 +205,11 @@ function DemoRunner({ open, onRan, llm }: { open: (to: string) => void; onRan: (
         </label>
         {llm && (
           <div className="segmented" role="group" aria-label="Which agent">
-            <button aria-pressed={agent === "scripted"} onClick={() => setAgent("scripted")} title="A deterministic stand-in that does whatever a document says. The worst case.">Scripted (worst case)</button>
-            <button aria-pressed={agent === "llm"} onClick={() => setAgent("llm")} title="A live Claude model reading the same documents">Claude (live)</button>
+            <button type="button" aria-pressed={agent === "scripted"} onClick={() => setAgent("scripted")} title="A deterministic stand-in that does whatever a document says. The worst case.">Scripted (worst case)</button>
+            <button type="button" aria-pressed={agent === "llm"} onClick={() => setAgent("llm")} title="A live Claude model reading the same documents">Claude (live)</button>
           </div>
         )}
-        <button className="btn primary" onClick={go} disabled={busy || !scenarios}>
+        <button type="button" className="btn primary" onClick={go} disabled={busy || !scenarios}>
           {busy ? (agent === "llm" ? "Claude is working…" : "Running…") : "Run it"}
         </button>
       </div>
@@ -253,7 +256,7 @@ function RunResult({ run, open }: { run: DemoRun; open: (to: string) => void }) 
         <ul className="calls">
           {fw.calls.map((c) => (
             <li key={c.key}>
-              <button className="link" onClick={() => open(`/decision/${encodeURIComponent(c.key)}`)}>
+              <button type="button" className="link" onClick={() => open(`/decision/${encodeURIComponent(c.key)}`)}>
                 <span className={`dot ${c.status === "executed" ? "allow" : c.status === "needs_approval" ? "approve" : "deny"}`} />
                 {c.status === "executed" ? "Paid" : c.status === "needs_approval" ? "Held for approval" : c.status === "denied" ? "Denied" : c.status}
                 {c.rule ? ` · ${ruleTitle(c.rule)}` : ""}
@@ -268,7 +271,7 @@ function RunResult({ run, open }: { run: DemoRun; open: (to: string) => void }) 
         )}
         {fw.payouts.length === 0 && <p className="big good">No money moved{fw.pendingApprovals ? ` · ${fw.pendingApprovals} waiting for you` : ""}</p>}
         {fw.pendingApprovals > 0 && (
-          <button className="btn" onClick={() => open("/approvals")}>
+          <button type="button" className="btn" onClick={() => open("/approvals")}>
             Open approval inbox
           </button>
         )}
@@ -293,8 +296,8 @@ function DriftDemo({ onDone }: { onDone: () => void }) {
   return (
     <div className="drift-demo">
       <span className="muted small">Reconciliation demo:</span>
-      <button className="btn subtle" onClick={() => go("unauthorized")}>PayPal reports a payment we never authorized</button>
-      <button className="btn subtle" onClick={() => go("mismatch")}>PayPal reports a different amount for a payment we made</button>
+      <button type="button" className="btn subtle" onClick={() => go("unauthorized")}>PayPal reports a payment we never authorized</button>
+      <button type="button" className="btn subtle" onClick={() => go("mismatch")}>PayPal reports a different amount for a payment we made</button>
       {msg && <span className={`small ${msg.ok ? "ok-text" : "bad-text"}`} role="status">{msg.text}</span>}
     </div>
   );

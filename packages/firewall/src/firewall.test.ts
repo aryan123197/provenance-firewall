@@ -313,6 +313,37 @@ describe("webhook reconciliation", () => {
     await hook(itemEvent({ id: "s2", batch: r.reference, status: "SUCCESS" }));
     expect(store.getExecution("pay-1")?.providerStatus).toBe("returned");
   });
+  test("payouts that did not arrive as paid are counted for the operator, and a later success clears the count", async () => {
+    const r = await pay();
+    expect(store.countPayoutsNeedingAttention()).toBe(0);
+    await hook(itemEvent({ id: "u", batch: r.reference, status: "UNCLAIMED", type: "PAYMENT.PAYOUTS-ITEM.UNCLAIMED" }));
+    expect(store.countPayoutsNeedingAttention()).toBe(1);
+    await hook(itemEvent({ id: "s", batch: r.reference, status: "SUCCESS" }));
+    expect(store.countPayoutsNeedingAttention()).toBe(0);
+    await hook(itemEvent({ id: "r", batch: r.reference, status: "RETURNED", type: "PAYMENT.PAYOUTS-ITEM.RETURNED" }));
+    expect(store.countPayoutsNeedingAttention()).toBe(1);
+  });
+  test("a failed payout is not flipped back to success by a later event, whatever the arrival order", async () => {
+    const r = await pay();
+    await hook(itemEvent({ id: "f", batch: r.reference, status: "FAILED", type: "PAYMENT.PAYOUTS-ITEM.FAILED" }));
+    await hook(itemEvent({ id: "s", batch: r.reference, status: "SUCCESS" }));
+    expect(store.getExecution("pay-1")?.providerStatus).toBe("failed");
+  });
+  test("without webhooks, polling PayPal records the status, and a settled payout is not polled again", async () => {
+    const r = await pay();
+    expect(store.getExecution("pay-1")?.providerStatus).toBeNull();
+    fake.setBatchStatus(r.reference, "UNCLAIMED");
+    await fw.refreshPayoutStatuses();
+    expect(store.getExecution("pay-1")?.providerStatus).toBe("unclaimed");
+    expect(store.countPayoutsNeedingAttention()).toBe(1);
+    fake.setBatchStatus(r.reference, "SUCCESS");
+    await fw.refreshPayoutStatuses();
+    expect(store.getExecution("pay-1")?.providerStatus).toBe("success");
+    expect(store.countPayoutsNeedingAttention()).toBe(0);
+    const gets = fake.calls.length;
+    await fw.refreshPayoutStatuses();
+    expect(fake.calls.length).toBe(gets);
+  });
   test("unrelated event types are ignored", async () => {
     expect(await hook(JSON.stringify({ id: "WH-X", event_type: "CUSTOMER.DISPUTE.CREATED", resource: {} }))).toEqual({ status: "ignored" });
   });

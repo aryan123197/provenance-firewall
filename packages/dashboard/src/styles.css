@@ -217,6 +217,8 @@ tbody th { font-weight: 600; white-space: nowrap; }
 .pending { border: 1px solid var(--approve); border-radius: 10px; padding: 16px 18px; background: color-mix(in srgb, var(--approve-bg) 25%, var(--surface)); }
 .pending header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
 .pending h3 { font-size: 19px; }
+.pending.collapsed { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; background: var(--surface); }
+.pending.collapsed h3 { font-size: 16px; overflow-wrap: anywhere; }
 .held-reason { margin: 10px 0 12px; }
 .actions { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-top: 14px; }
 .buttons { display: flex; gap: 8px; margin-left: auto; }

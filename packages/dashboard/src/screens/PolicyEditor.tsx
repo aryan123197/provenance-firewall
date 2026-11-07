@@ -82,11 +82,11 @@ export function PolicyEditor({ view, onActivated }: { view: PolicyView | undefin
         />
       </label>
       <div className="row">
-        <button className="btn primary" onClick={compile} disabled={!available || busy !== undefined || !english.trim()}>
+        <button type="button" className="btn primary" onClick={compile} disabled={!available || busy !== undefined || !english.trim()}>
           {busy === "compile" ? "Compiling…" : "Compile to rules"}
         </button>
         {!available && <span className="muted small">Needs a Claude API key (<code>ANTHROPIC_API_KEY</code>) on the server.</span>}
-        {available && !english && <button className="link" onClick={() => setEnglish(EXAMPLE)}>Use an example</button>}
+        {available && !english && <button type="button" className="link" onClick={() => setEnglish(EXAMPLE)}>Use an example</button>}
       </div>
       <p className="hint">The model only drafts the rules. It never decides whether a payment moves, and the built-in checks on where a payee or amount came from cannot be changed by any policy.</p>
 
@@ -147,8 +147,8 @@ export function PolicyEditor({ view, onActivated }: { view: PolicyView | undefin
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="you@company.example" autoComplete="name" />
             </label>
             <div className="buttons">
-              <button className="btn" onClick={() => setResult(undefined)} disabled={busy !== undefined}>Discard</button>
-              <button className="btn primary" onClick={activate} disabled={busy !== undefined || !result.canActivate || (needsAck && !ack) || noChange}>
+              <button type="button" className="btn" onClick={() => setResult(undefined)} disabled={busy !== undefined}>Discard</button>
+              <button type="button" className="btn primary" onClick={activate} disabled={busy !== undefined || !result.canActivate || (needsAck && !ack) || noChange}>
                 {busy === "activate" ? "Activating…" : `Confirm and activate v${result.baseVersion + 1}`}
               </button>
             </div>

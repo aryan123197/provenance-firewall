@@ -407,7 +407,7 @@ describe("OAuth tokens under concurrency", () => {
   });
 
   test("a failed token request is not remembered: the next call tries again", async () => {
-    const { fake, adapter } = setup();
+    const { fake } = setup();
     const bad = new PayPalAdapter({ clientId: "wrong", clientSecret: "creds", authority, baseUrl: "http://localhost:9999", fetch: fake.fetch });
     await expect(bad.execute(allowed())).rejects.toBeInstanceOf(AdapterError);
     await expect(bad.execute(allowed())).rejects.toBeInstanceOf(AdapterError);

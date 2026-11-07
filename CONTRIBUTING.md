@@ -7,8 +7,13 @@ pnpm install
 pnpm check      # typecheck (all packages and the dashboard) and every test
 pnpm coverage   # the same tests with a coverage floor, which CI also enforces
 pnpm build      # build the dashboard
+pnpm lint       # Biome lint (formatting is not enforced)
+pnpm ui:check   # after build: axe-core WCAG 2.1 A/AA and no sideways scroll on every screen, in a real browser (needs `pnpm exec playwright install chromium`)
+pnpm audit:deps # known-vulnerable dependencies, high or critical
 pnpm harness    # regenerate reports/scorecard.{md,json}
 ```
+
+CI runs all of these on every push and pull request (jobs `check`, `ui` and `security`; the last also scans the history for secrets with gitleaks).
 
 ## Rules that keep the guarantees true
 

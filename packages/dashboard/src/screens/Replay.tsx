@@ -10,7 +10,7 @@ export function Replay({ id, back, open }: { id: string; back: () => void; open:
   if (error && !rec) {
     return (
       <div className="stack">
-        <button className="link back" onClick={back}>← Back to activity</button>
+        <button type="button" className="link back" onClick={back}>← Back to activity</button>
         <ErrorNote message={error} />
       </div>
     );
@@ -24,7 +24,7 @@ export function Replay({ id, back, open }: { id: string; back: () => void; open:
 
   return (
     <div className="stack">
-      <button className="link back" onClick={back}>← Back to activity</button>
+      <button type="button" className="link back" onClick={back}>← Back to activity</button>
 
       <Card className={`hero ${d.verdict === "allow" ? "allow" : d.verdict === "deny" ? "deny" : "approve"}`}>
         <div className="hero-top">
@@ -86,7 +86,7 @@ export function Replay({ id, back, open }: { id: string; back: () => void; open:
                 <dt>Approval</dt>
                 <dd>
                   {approval.status === "pending" ? (
-                    <>Waiting for a person. <button className="link" onClick={() => open("/approvals")}>Open the inbox</button></>
+                    <>Waiting for a person. <button type="button" className="link" onClick={() => open("/approvals")}>Open the inbox</button></>
                   ) : (
                     <>
                       {approval.status === "approved" ? "Approved" : "Rejected"} by <strong>{approval.resolvedBy}</strong>
