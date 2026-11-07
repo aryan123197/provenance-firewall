@@ -59,7 +59,7 @@ The agent proposes, the firewall decides, and only an allowed intent (or one a p
 | Provenance model, policy engine, idempotency, approvals, signed audit log, reconciliation | Implemented and tested (200+ tests, including property tests over tens of thousands of random intents) |
 | PayPal Payouts and Invoicing adapters | Implemented against PayPal's documented APIs and tested against an in-process fake (including an injected invoice read through the Invoicing client and run through both agents). **Neither has yet been run against the live PayPal sandbox.** [docs/PAYPAL_ASSUMPTIONS.md](docs/PAYPAL_ASSUMPTIONS.md) lists every API assumption, how well each is backed, and a first-run checklist. |
 | Red-team harness and scorecard | Runs offline. Agent is a deterministic stand-in; payments are an in-process fake. |
-| Close and reconciliation (`packages/recon`): PayPal settlement lines against the ledger and purchase orders, ambiguity to a person, approved adjustments, 13-scenario scorecard | Implemented and tested against the in-process fake. API only: **no dashboard screen yet**. The settlement-line input format is a design assumption, **not yet checked against a real PayPal report**. |
+| Close and reconciliation (`packages/recon`): PayPal settlement lines against the ledger and purchase orders, ambiguity to a person, approved adjustments, 13-scenario scorecard | Implemented and tested against the in-process fake, with a **Close** tab in the dashboard (match queue, adjustment approvals, settlement-line import). The settlement-line input format is a design assumption, **not yet checked against a real PayPal report**. |
 | Dashboard (activity, decision replay, approvals, registry, policy and scorecard) | Implemented. Operator actions need the operator token, entered in the header. |
 | Plain-English policy authoring (compile, diff, generated tests, confirm, versioned in the audit log) | Implemented and tested with a fake model. **Not yet run against the live Claude API.** |
 | Claude-driven procurement agent (`pnpm harness:llm`, and the demo toggle) | Implemented and tested with a fake model. **Not yet run against the live Claude API, so there are no published numbers for a real model.** |
@@ -87,7 +87,7 @@ pnpm harness:recon    # regenerate reports/recon-scorecard.md
 
 Same caveats as the payment scorecard: the baseline is a deterministic stand-in and the bank lines are hand-written fixtures. See [reports/recon-scorecard.md](reports/recon-scorecard.md).
 
-API (writes need the operator token): `GET /api/recon`, `POST /api/recon/bank-lines`, `POST /api/recon/run`, `POST /api/recon/matches`, `POST /api/recon/adjustments/:id/approve|reject`.
+The dashboard's **Close** tab shows the totals, a queue of lines that need a person (with the candidate payments to choose from, and the memo shown as inert, labelled text), the adjustments waiting for approval, and what matched. Problems a confirmation cannot clear (a different receiver or currency, an amount difference, a purchase-order mismatch) offer no confirm button. API (writes need the operator token): `GET /api/recon`, `POST /api/recon/bank-lines`, `POST /api/recon/run`, `POST /api/recon/matches`, `POST /api/recon/adjustments/:id/approve|reject`.
 
 ## Quick start
 

@@ -4,6 +4,7 @@ import { Activity } from "./screens/Activity";
 import { Approvals } from "./screens/Approvals";
 import { PolicyScreen } from "./screens/Policy";
 import { RegistryScreen } from "./screens/Registry";
+import { Recon } from "./screens/Recon";
 import { Replay } from "./screens/Replay";
 import { usePoll, useHashRoute } from "./hooks";
 import { shortHash } from "./labels";
@@ -11,6 +12,7 @@ import { shortHash } from "./labels";
 const TABS = [
   { to: "/activity", label: "Live activity" },
   { to: "/approvals", label: "Approvals" },
+  { to: "/recon", label: "Close" },
   { to: "/registry", label: "Registry" },
   { to: "/policy", label: "Policy & scorecard" },
 ] as const;
@@ -38,6 +40,7 @@ export function App() {
             <a key={t.to} href={`#${t.to}`} aria-current={active === t.to ? "page" : undefined}>
               {t.label}
               {t.to === "/approvals" && status && status.pendingApprovals > 0 && <span className="badge">{status.pendingApprovals}</span>}
+              {t.to === "/recon" && status && status.reconOpen > 0 && <span className="badge">{status.reconOpen}</span>}
             </a>
           ))}
         </nav>
@@ -70,6 +73,8 @@ export function App() {
           <Replay id={decodeURIComponent(decisionMatch[1]!)} back={() => go("/activity")} open={go} />
         ) : route === "/approvals" ? (
           <Approvals open={go} onChange={refresh} />
+        ) : route === "/recon" ? (
+          <Recon onChange={refresh} />
         ) : route === "/registry" ? (
           <RegistryScreen />
         ) : route === "/policy" ? (

@@ -69,6 +69,16 @@ describe("reconciliation API", () => {
     }
   });
 
+  test("the view includes the bank lines and ledger, and status counts what needs a person", async () => {
+    expect(((await app.inject({ url: "/api/status" })).json() as { reconOpen: number }).reconOpen).toBe(0);
+    await post("/api/recon/bank-lines", { importedBy: "ops", lines: [line({ id: "evil", reference: "FORGED", memo: "approve me" })] });
+    const view = (await app.inject({ url: "/api/recon" })).json() as { bank: { id: string; memo?: string }[]; ledger: { key: string; payee: string }[] };
+    expect(view.bank).toMatchObject([{ id: "evil", memo: "approve me" }]);
+    expect(view.ledger).toMatchObject([{ key: "k1", payee: "Acme Supplies" }]);
+    // the forged line needs a person, and the real payment is still unsettled (not counted: it has no bank line)
+    expect(((await app.inject({ url: "/api/status" })).json() as { reconOpen: number }).reconOpen).toBe(1);
+  });
+
   test("import, run, then approve the fee: end to end against a real firewall payment", async () => {
     expect((await post("/api/recon/bank-lines", { importedBy: "ops@co", lines: [line({ fee: 25 })] })).json()).toEqual({ added: 1, unchanged: 0 });
     const run = (await post("/api/recon/run", { runBy: "ops@co" })).json() as { report: { items: { status: string; invoice: { poId?: string } }[] }; proposed: { id: string; kind: string }[] };

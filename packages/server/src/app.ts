@@ -103,6 +103,12 @@ export function createApp(deps: AppDeps): FastifyInstance {
     }
   };
 
+  // Bank lines that still need a person, plus adjustments waiting for approval.
+  const reconOpen = () => {
+    const recon = reconOf();
+    return recon.report().items.filter((i) => i.bankLineId !== null && i.status !== "matched").length + recon.adjustments("proposed").length;
+  };
+
   app.get("/api/status", async () => {
     const { store, policy: activePolicy } = deps.runtime();
     const policy = activePolicy();
@@ -117,6 +123,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
       audit: audit.ok ? { ok: true, count: audit.count, head: audit.head } : { ok: false, seq: audit.seq, reason: audit.reason },
       driftOpen: store.listDrift("open").length,
       pendingApprovals: store.listApprovals("pending").length,
+      reconOpen: reconOpen(),
     };
   });
 
@@ -201,7 +208,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
   };
   app.get("/api/recon", async () => {
     const recon = reconOf();
-    return { report: recon.report(), adjustments: recon.adjustments(), config: recon.config };
+    return { report: recon.report(), adjustments: recon.adjustments(), config: recon.config, bank: recon.bankLines(), ledger: recon.ledger() };
   });
   app.post<{ Body: { importedBy?: string; lines?: unknown } }>("/api/recon/bank-lines", { preHandler: requireOperator }, async (req, reply) => {
     try {

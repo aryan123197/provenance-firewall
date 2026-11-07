@@ -100,6 +100,9 @@ importers:
       '@pfw/harness':
         specifier: workspace:*
         version: link:../harness
+      '@pfw/recon':
+        specifier: workspace:*
+        version: link:../recon
       '@pfw/store':
         specifier: workspace:*
         version: link:../store

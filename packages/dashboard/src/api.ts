@@ -1,9 +1,11 @@
 import type { Decision } from "@pfw/core";
 import type { Approval, AuditEntry, DecisionRecord, DecisionSummary, Drift } from "@pfw/store";
 import type { Scorecard, SideScore } from "@pfw/harness";
+import type { AdjustmentRecord, BankLine, LedgerEntry, ReconConfig, ReconItem, ReconReport } from "@pfw/recon";
 
 export type ScenarioResultView = Scorecard["scenarios"][number];
 
+export type { AdjustmentRecord, BankLine, LedgerEntry, ReconItem, ReconReport };
 export type { Approval, AuditEntry, Decision, DecisionRecord, DecisionSummary, Drift, Scorecard, SideScore };
 
 export interface Status {
@@ -16,6 +18,7 @@ export interface Status {
   audit: { ok: true; count: number; head: { seq: number; hash: string } | null } | { ok: false; seq: number; reason: string };
   driftOpen: number;
   pendingApprovals: number;
+  reconOpen: number;
 }
 
 export interface Vendor {
@@ -126,6 +129,14 @@ export type ApprovalResult =
   | { status: "rejected" | "needs_approval" | "denied" | "execution_failed" | "invalid" }
   | { status: "blocked"; reason: string };
 
+export interface ReconView {
+  report: ReconReport;
+  adjustments: AdjustmentRecord[];
+  config: ReconConfig;
+  bank: BankLine[];
+  ledger: LedgerEntry[];
+}
+
 const TOKEN_KEY = "pfw.operatorToken";
 
 /** The operator token lives in this tab's session storage only: it is not persisted and not sent anywhere but our API. */
@@ -176,6 +187,13 @@ export const api = {
   saveVendor: (v: Vendor, changedBy: string) => post<VendorChange>("/api/registry/vendors", { ...v, changedBy }),
   addPurchaseOrder: (po: { id: string; vendorId: string; amount: number; currency: string }, changedBy: string) =>
     post<{ ok: true }>("/api/registry/purchase-orders", { ...po, changedBy }),
+  recon: () => request<ReconView>("/api/recon"),
+  reconImport: (lines: unknown, importedBy: string) => post<{ added: number; unchanged: number }>("/api/recon/bank-lines", { lines, importedBy }),
+  reconRun: (runBy: string) => post<{ proposed: AdjustmentRecord[] }>("/api/recon/run", { runBy }),
+  reconConfirm: (bankLineId: string, ledgerKey: string, resolvedBy: string, note: string) =>
+    post<{ ok: true }>("/api/recon/matches", { bankLineId, ledgerKey, resolvedBy, note: note || undefined }),
+  reconAdjustment: (id: string, approve: boolean, approver: string, note: string) =>
+    post<AdjustmentRecord>(`/api/recon/adjustments/${encodeURIComponent(id)}/${approve ? "approve" : "reject"}`, { approver, note: note || undefined }),
   drift: () => request<{ drift: Drift[] }>("/api/drift").then((r) => r.drift),
   policy: () => request<PolicyView>("/api/policy"),
   compilePolicy: (english: string) => post<CompileResult>("/api/policy/compile", { english }),
