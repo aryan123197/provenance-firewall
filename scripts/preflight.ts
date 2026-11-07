@@ -14,7 +14,7 @@ const add = (ok: boolean, label: string, hint?: string) => lines.push({ ok, labe
 
 const need = ["PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PFW_DEMO_RECEIVER"];
 for (const k of need) add(Boolean(env(k)), `${k} is set`, "add it as an environment secret, then start a new session");
-add(Boolean(env("ANTHROPIC_API_KEY")), "ANTHROPIC_API_KEY is set (only needed for pnpm harness:llm and the live compiler)", "optional");
+add(Boolean(env("ANTHROPIC_API_KEY") || env("GEMINI_API_KEY") || env("GOOGLE_API_KEY")), "ANTHROPIC_API_KEY or GEMINI_API_KEY is set (only needed for pnpm harness:llm and the live compiler)", "optional");
 
 let reachable = false;
 try {

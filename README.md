@@ -108,6 +108,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | `REGISTRY_PATH` | none | JSON `{ vendors, purchaseOrders }`, the operator-maintained registry |
 | `OPERATOR_TOKEN` | none | Bearer token required to approve or reject |
 | `ANTHROPIC_API_KEY` | none | Enables the policy compiler and the live Claude agent. `PFW_MODEL` overrides the model (default `claude-opus-5-5`). |
+| `GEMINI_API_KEY` | none | Same two features on Google Gemini instead (free tier works), used only when no Anthropic key is set. Default model `gemini-2.5-flash`. Less tested than the Claude path; see `packages/llm/src/gemini.ts`. |
 | `RATE_LIMIT_PER_MIN` | `240` | Requests per minute per client IP; `0` turns it off. Set `TRUST_PROXY=1` behind a proxy such as Render so real client addresses are used. |
 | `LLM_DAILY_CALLS` | `300` | Hard cap on Claude API calls per UTC day, across the policy compiler and the live agent. Calls past it return 429. Held in memory, so a restart resets it. |
 | `OPEN_OPERATOR` | off | `1` lets anyone approve or reject. Public demos on simulated or sandbox money only. |
