@@ -106,6 +106,11 @@ export function reconcile(input: ReconInput): ReconReport {
 
   const pair = (b: BankLine, l: LedgerEntry, method: Method): ReconItem => {
     const diff = b.amount - l.amount;
+    // PayPal's own status comes first: a payout that failed, was returned or is still pending has no settlement to match,
+    // whatever else agrees. Unclaimed money has left our balance, so it settles (it can still come back after 30 days).
+    if (b.status !== undefined && b.status !== "success" && b.status !== "unclaimed") {
+      return make(b, l, "ambiguous", method, "payout_not_settled", `PayPal reports this payout as ${b.status}, so there is no settlement to match.`);
+    }
     if (b.currency !== l.currency) return make(b, l, "ambiguous", method, "currency_mismatch", `Bank line is in ${b.currency} but the payment was authorized in ${l.currency}.`);
     if (b.receiver !== undefined && b.receiver !== l.receiver) return make(b, l, "ambiguous", method, "receiver_mismatch", "The money went to a different account than the one authorized.");
     // Without a receiver the payee cannot be checked, so nothing is matched on its own. A person who has looked at the

@@ -68,7 +68,7 @@ The agent proposes, the firewall decides, and only an allowed intent (or one a p
 | PayPal Payouts adapter and webhook verification | **Run against the live PayPal sandbox (2026-11-07)**: payout created and read back, a resubmitted payout resolves to the original, webhook register/list/delete work and a forged event is rejected. That run found one wrong assumption (where PayPal puts the link to the original payout), now fixed. Re-check any time with `pnpm sandbox:check`. A genuinely signed webhook delivery needs a public URL and has not been seen yet. |
 | PayPal Invoicing adapter | Implemented against PayPal's documented API and tested against an in-process fake (including an injected invoice read through the client and run through both agents). **Not run live**: the sandbox app needs the Invoicing feature enabled. [docs/PAYPAL_ASSUMPTIONS.md](docs/PAYPAL_ASSUMPTIONS.md) lists every API assumption, how well each is backed, and what was seen live. |
 | Red-team harness and scorecard | Runs offline. Agent is a deterministic stand-in; payments are an in-process fake. |
-| Close and reconciliation (`packages/recon`): PayPal settlement lines against the ledger and purchase orders, ambiguity to a person, approved adjustments, 14-scenario scorecard | Implemented and tested against the in-process fake, with a **Close** tab in the dashboard (match queue, adjustment approvals, settlement-line import). The settlement-line input format is a design assumption, **not yet checked against a real PayPal report**. |
+| Close and reconciliation (`packages/recon`): PayPal settlement lines against the ledger and purchase orders, ambiguity to a person, approved adjustments, 14-scenario scorecard | Implemented and tested against the in-process fake, with a **Close** tab in the dashboard (match queue, adjustment approvals, settlement-line import). The import accepts PayPal's payout batch response as it is, and was **checked against two real sandbox payouts (2026-11-08)**: the join keys, amounts, fee and an `UNCLAIMED` item are confirmed; a fully `SUCCESS` item, large batches and Transaction Search are not. Re-check with `pnpm recon:live-check`; [docs/PAYPAL_ASSUMPTIONS.md](docs/PAYPAL_ASSUMPTIONS.md) says what is confirmed. |
 | Dashboard (activity, decision replay, approvals, registry, policy and scorecard) | Implemented. Operator actions need the operator token, entered in the header. |
 | Plain-English policy authoring (compile, diff, generated tests, confirm, versioned in the audit log) | Implemented and tested with a fake model. **Not yet run against the live Claude API.** |
 | Claude-driven procurement agent (`pnpm harness:llm`, and the demo toggle) | Implemented and tested with a fake model. **Not yet run against the live Claude API, so there are no published numbers for a real model.** |
@@ -112,7 +112,8 @@ pnpm harness:llm           # same scenarios with a real Claude agent (needs ANTH
 pnpm seed:invoices         # create a clean and an injected invoice in your PayPal sandbox (needs credentials)
 pnpm demo:invoices <ids>   # read them back and compare the unprotected agent with the firewalled one
 pnpm e2e                   # scripted payment (attack step runs offline; payout step needs sandbox credentials)
-pnpm sandbox:check         # end-to-end check against the real PayPal sandbox: credentials, attack denied, $1 payout, restart-safe retry, webhooks, Invoicing
+pnpm sandbox:check         # end-to-end check against the real PayPal sandbox: credentials, attack denied, $1 payout, restart-safe retry, webhooks
+pnpm recon:live-check      # one $1 sandbox payout, read back from PayPal, mapped, imported and reconciled against the firewall's own record, Invoicing
 ```
 
 ### Plain-English policies

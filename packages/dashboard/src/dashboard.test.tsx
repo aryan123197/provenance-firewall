@@ -685,6 +685,35 @@ describe("close and reconciliation screen", () => {
     expect(screen.getByRole("button", { name: /^This is it: the payment to Acme Supplies/ })).toBeTruthy();
   });
 
+  test("what is pasted is classified: our lines, PayPal's payout batch, or either wrapped", async () => {
+    const { splitImport } = await import("./screens/Recon");
+    const batch = { batch_header: { payout_batch_id: "B1" }, items: [{ payout_item_id: "I1" }] };
+    const ownLine = { id: "b1", amount: 100, currency: "USD", date: "2026-11-03T00:00:00Z" };
+    expect(splitImport([ownLine])).toEqual({ lines: [ownLine] });
+    expect(splitImport(batch)).toEqual({ payoutBatches: [batch] });
+    expect(splitImport([batch, batch])).toEqual({ payoutBatches: [batch, batch] });
+    expect(splitImport([ownLine, batch])).toEqual({ lines: [ownLine], payoutBatches: [batch] });
+    expect(splitImport({ lines: [ownLine] })).toEqual({ lines: [ownLine] });
+    expect(splitImport({ payoutBatches: [batch] })).toEqual({ payoutBatches: [batch] });
+    expect(splitImport({ surprise: 1 })).toEqual({ lines: { surprise: 1 } }); // sent as it is, so the server explains what is wrong
+    expect(splitImport("text")).toEqual({ lines: "text" });
+  });
+
+  test("pasting PayPal's payout batch response sends it as payoutBatches", async () => {
+    const batch = { batch_header: { payout_batch_id: "B1" }, items: [{ payout_item_id: "I1" }] };
+    const calls = mockApi({ "GET /api/recon": { body: view({ report: { items: [], totals: [] }, bank: [], ledger: [] }) }, "POST /api/recon/bank-lines": { body: { added: 1, unchanged: 0 } } });
+    const user = userEvent.setup();
+    await renderRecon();
+    await user.type(await screen.findByPlaceholderText("you@company.example"), "ops@co");
+    await user.click(screen.getByRole("button", { name: "Import settlement lines" }));
+    const box = screen.getByRole("textbox", { name: /Settlement lines/ });
+    await user.click(box);
+    await user.paste(JSON.stringify(batch));
+    await user.click(screen.getByRole("button", { name: "Import" }));
+    await screen.findByText(/Imported 1 new line/);
+    expect(calls.find((c) => c.path === "/api/recon/bank-lines")!.body).toEqual({ payoutBatches: [batch], importedBy: "ops@co" });
+  });
+
   test("with nothing imported it says what to do", async () => {
     mockApi({ "GET /api/recon": { body: view({ report: { items: [], totals: [] }, bank: [], ledger: [] }) } });
     await renderRecon();

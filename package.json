@@ -26,6 +26,7 @@
     "demo:invoices": "tsx scripts/demo-invoices.ts",
     "verify:audit": "tsx scripts/verify-audit.ts",
     "register:webhook": "tsx scripts/register-webhook.ts",
+    "recon:live-check": "tsx scripts/recon-live-check.ts",
     "sandbox:check": "tsx scripts/sandbox-check.ts",
     "coverage": "vitest run --coverage",
     "lint": "biome lint",

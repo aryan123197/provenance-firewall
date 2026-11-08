@@ -6,6 +6,7 @@ import { createFakePayPal } from "@pfw/adapter/testing";
 import { Firewall } from "@pfw/firewall";
 import { Store } from "@pfw/store";
 import { createApp } from "./app";
+import fixture from "../../recon/src/fixtures/paypal-payout-batch.sandbox.json";
 
 const yaml = readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8");
 const policy = loadPolicy(yaml);
@@ -177,5 +178,55 @@ describe("a bank line without a receiver over the API", () => {
     expect(view.report.items[0]?.reason).toBe("receiver_unverified");
     expect((await post("/api/recon/matches", { bankLineId: "bl1", ledgerKey: "k1", resolvedBy: "ops@co" })).json()).toEqual({ ok: true });
     expect(((await app.inject({ url: "/api/recon" })).json() as { report: { items: { status: string }[] } }).report.items[0]?.status).toBe("matched");
+  });
+});
+
+describe("importing PayPal's payout batch response as it is", () => {
+  /** The real recorded batch, re-pointed at the payment this test's firewall actually made. */
+  const batchForOurPayment = (edit: (item: Record<string, any>) => void = () => {}) => {
+    const b = JSON.parse(JSON.stringify(fixture.batch)) as Record<string, any>;
+    const item = b.items[0];
+    const exec = store.getExecution("k1")!;
+    item.payout_batch_id = exec.reference;
+    b.batch_header.payout_batch_id = exec.reference;
+    item.payout_item.sender_item_id = exec.requestId;
+    item.payout_item.receiver = "acme@sandbox.example";
+    item.payout_item.amount.value = "45.00";
+    item.transaction_status = "SUCCESS";
+    edit(item);
+    return b;
+  };
+
+  test("is mapped, matched to the firewall's payment, and its fee proposed", async () => {
+    expect((await post("/api/recon/bank-lines", { importedBy: "ops", payoutBatches: [batchForOurPayment()] })).json()).toEqual({ added: 1, unchanged: 0 });
+    const run = (await post("/api/recon/run", { runBy: "ops" })).json() as { report: { items: { status: string; method: string; invoice: { poId?: string } }[] }; proposed: { kind: string; amount: number }[] };
+    expect(run.report.items[0]).toMatchObject({ status: "matched", method: "reference", invoice: { poId: "po1" } });
+    expect(run.proposed).toMatchObject([{ kind: "fee", amount: 25 }]);
+    const view = (await app.inject({ url: "/api/recon" })).json() as { bank: { id: string; status: string; reference: string }[] };
+    expect(view.bank[0]).toMatchObject({ id: "XZ3W3HWQLKTMW", status: "success" });
+  });
+
+  test("a payout PayPal says failed is held for a person, not matched", async () => {
+    await post("/api/recon/bank-lines", { importedBy: "ops", payoutBatches: [batchForOurPayment((i) => (i.transaction_status = "FAILED"))] });
+    const run = (await post("/api/recon/run", { runBy: "ops" })).json() as { report: { items: { status: string; reason: string }[] }; proposed: unknown[] };
+    expect(run.report.items[0]).toMatchObject({ status: "ambiguous", reason: "payout_not_settled" });
+    expect(run.proposed).toEqual([]);
+    // and the server will not let a person confirm it away
+    const r = await post("/api/recon/matches", { bankLineId: "XZ3W3HWQLKTMW", ledgerKey: "k1", resolvedBy: "ops@co" });
+    expect(r.statusCode).toBe(409);
+  });
+
+  test("can be sent together with lines in our own shape", async () => {
+    const r = await post("/api/recon/bank-lines", { importedBy: "ops", lines: [line({ id: "own" })], payoutBatches: [batchForOurPayment()] });
+    expect(r.json()).toEqual({ added: 2, unchanged: 0 });
+  });
+
+  test("a malformed batch is a 400 that says what is wrong, and nothing is imported", async () => {
+    const bad = batchForOurPayment((i) => (i.payout_item.amount.value = "1.005"));
+    const r = await post("/api/recon/bank-lines", { importedBy: "ops", payoutBatches: [batchForOurPayment(), bad] });
+    expect(r.statusCode).toBe(400);
+    expect((r.json() as { error: string }).error).toMatch(/XZ3W3HWQLKTMW.*amount/);
+    expect((await post("/api/recon/bank-lines", { importedBy: "ops", payoutBatches: "nope" })).statusCode).toBe(400);
+    expect(((await app.inject({ url: "/api/recon" })).json() as { bank: unknown[] }).bank).toEqual([]);
   });
 });

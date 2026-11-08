@@ -17,7 +17,7 @@ import {
 } from "@pfw/core";
 import type { Firewall } from "@pfw/firewall";
 import { ApprovalStateError, PolicyConflictError, RegistryError, type Store } from "@pfw/store";
-import { ReconInputError, ReconStateError, ReconStore } from "@pfw/recon";
+import { ReconInputError, ReconStateError, ReconStore, bankLinesFromPayoutBatch } from "@pfw/recon";
 import { LlmBudgetError, LlmRefusalError, type PolicyCompiler } from "@pfw/llm";
 import { z } from "zod";
 
@@ -224,9 +224,17 @@ export function createApp(deps: AppDeps): FastifyInstance {
     const recon = reconOf();
     return { report: recon.report(), adjustments: recon.adjustments(), config: recon.config, bank: recon.bankLines(), ledger: recon.ledger() };
   });
-  app.post<{ Body: { importedBy?: string; lines?: unknown } }>("/api/recon/bank-lines", { preHandler: requireOperator }, async (req, reply) => {
+  // Settlement lines come either already in our shape (`lines`) or as PayPal's own payout batch details (`payoutBatches`,
+  // the response of GET /v1/payments/payouts/{id}), which are mapped here so nobody has to translate them by hand.
+  app.post<{ Body: { importedBy?: string; lines?: unknown; payoutBatches?: unknown } }>("/api/recon/bank-lines", { preHandler: requireOperator }, async (req, reply) => {
     try {
-      return reconOf().importBankLines(req.body?.lines, String(req.body?.importedBy ?? ""));
+      const { lines, payoutBatches } = req.body ?? {};
+      let all: unknown = lines;
+      if (payoutBatches !== undefined) {
+        if (!Array.isArray(payoutBatches)) throw new ReconInputError("payoutBatches must be an array of PayPal payout batch details");
+        all = [...(Array.isArray(lines) ? lines : []), ...payoutBatches.flatMap((b) => bankLinesFromPayoutBatch(b))];
+      }
+      return reconOf().importBankLines(all, String(req.body?.importedBy ?? ""));
     } catch (e) {
       return reconErrors(reply, e);
     }

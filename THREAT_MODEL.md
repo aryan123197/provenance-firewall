@@ -58,11 +58,12 @@ Settlement lines are a second place untrusted text enters: a memo, a reference o
 | A payout we did not authorize with the same amount as one we did | Same: `unmatched`, and the real payment stays "not settled" rather than being credited. |
 | Money settled to a different account, or in a different currency, with an otherwise perfect match | `ambiguous`; no adjustment is proposed; a person cannot confirm it through the match endpoint either. |
 | A line with a perfect reference and amount but no receiver, so the payee is never checked | Never matched on its own: `ambiguous` (`receiver_unverified`) until a person confirms it. |
+| A payout PayPal reports as failed, returned or still pending, imported as if the money had settled | The line carries PayPal's `transaction_status`; only `SUCCESS` and `UNCLAIMED` settle. Anything else is `ambiguous` (`payout_not_settled`), is never matched on its own, gets no fee proposal and cannot be confirmed away. |
 | The same payout reported twice | Both lines are `ambiguous` (two lines claim one payment); neither matches. |
 | A small "rounding" difference used to hide a larger one | Differences are never absorbed by the matcher. Only a person can approve an adjustment, one at a time, up to a fixed ceiling, re-checked at approval time. |
 | Editing or deleting a settlement line after the fact | Lines are append-only in the database; re-importing a known id with different content is refused. Imports, runs, confirmations and adjustments are signed audit entries. |
 
-Not covered: the real shape of PayPal's settlement report (see the README status table), refunds, returns and chargebacks (these have negative or reversing amounts, which the importer rejects today, so they must be handled outside this tool), multi-currency conversion, and an operator who confirms a wrong match on purpose (it is attributed and audited, not prevented).
+Not covered: a fully `SUCCESS` payout item, very large (paginated) batches and PayPal's Transaction Search or downloadable settlement reports have not been checked against the real sandbox (the README status table and `docs/PAYPAL_ASSUMPTIONS.md` list what has), refunds, returns and chargebacks that arrive as negative or reversing amounts (the importer rejects them today, so they must be handled outside this tool; a payout PayPal later marks `RETURNED` is held, not reversed), multi-currency conversion, and an operator who confirms a wrong match on purpose (it is attributed and audited, not prevented).
 
 ## Known limitations and non-goals
 

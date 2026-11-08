@@ -86,8 +86,7 @@ export function Recon({ onChange }: { onChange: () => void }) {
         } catch {
           throw new Error("That is not valid JSON. Paste an array of settlement lines.");
         }
-        const lines = Array.isArray(parsed) ? parsed : (parsed as { lines?: unknown })?.lines;
-        const r = await api.reconImport(lines, who);
+        const r = await api.reconImport(splitImport(parsed), who);
         setJson("");
         setImporting(false);
         return r;
@@ -122,7 +121,7 @@ export function Recon({ onChange }: { onChange: () => void }) {
         {importing && (
           <div className="recon-import">
             <label className="field">
-              <span>Settlement lines (JSON array; amounts in cents)</span>
+              <span>Settlement lines (JSON, amounts in cents) or a PayPal payout batch response</span>
               <textarea value={json} onChange={(e) => setJson(e.target.value)} spellCheck={false} placeholder={'[{"id":"bl_1","reference":"PAYOUT-ITEM-ID","amount":45000,"currency":"USD","date":"2026-11-03T10:00:00Z","receiver":"ap@vendor.example","fee":25}]'} />
             </label>
             <div className="buttons">
@@ -199,7 +198,7 @@ function Totals({ view }: { view: ReconView | undefined }) {
         <div className="kpi-group" key={t.currency}>
           <h3>{t.currency}</h3>
           <div className="kpis">
-            <div className="kpi"><b>{money(t.bank, t.currency)}</b><span>PayPal settled</span></div>
+            <div className="kpi"><b>{money(t.bank, t.currency)}</b><span>PayPal reported</span></div>
             <div className="kpi"><b>{money(t.matched, t.currency)}</b><span>Matched</span></div>
             <div className="kpi"><b>{money(t.ambiguous, t.currency)}</b><span>Ambiguous</span></div>
             <div className="kpi"><b>{money(t.unmatched, t.currency)}</b><span>Unmatched</span></div>
@@ -209,6 +208,24 @@ function Totals({ view }: { view: ReconView | undefined }) {
       ))}
     </>
   );
+}
+
+const isObject = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === "object" && !Array.isArray(x);
+/** PayPal's payout batch details carry an `items` array or a `batch_header`; our own lines carry neither. */
+const isPayoutBatch = (x: unknown) => isObject(x) && (Array.isArray(x.items) || isObject(x.batch_header));
+
+/** What was pasted: our settlement lines, PayPal's payout batch details (one, or an array of them), or `{ lines }` / `{ payoutBatches }`. */
+export function splitImport(parsed: unknown): { lines?: unknown; payoutBatches?: unknown[] } {
+  if (Array.isArray(parsed)) {
+    const batches = parsed.filter(isPayoutBatch);
+    const lines = parsed.filter((x) => !isPayoutBatch(x));
+    return { ...(lines.length || !batches.length ? { lines } : {}), ...(batches.length ? { payoutBatches: batches } : {}) };
+  }
+  if (isPayoutBatch(parsed)) return { payoutBatches: [parsed] };
+  if (isObject(parsed) && ("lines" in parsed || "payoutBatches" in parsed)) {
+    return { ...("lines" in parsed ? { lines: parsed.lines } : {}), ...(Array.isArray(parsed.payoutBatches) ? { payoutBatches: parsed.payoutBatches } : {}) };
+  }
+  return { lines: parsed };
 }
 
 /** A note belongs to the one card it is written on, so it can never ride along with a different action. */

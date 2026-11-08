@@ -1,5 +1,8 @@
 /** Everything here is integer minor units (cents) and ISO dates. No floats touch money. */
 
+/** What PayPal says happened to a payout item, in the same words the adapter uses (see mapPayPalStatus). */
+export type PayoutStatus = "success" | "pending" | "failed" | "unclaimed" | "returned" | "unknown";
+
 /** One line of PayPal's own record of money that moved. `memo` is free text from outside, so it is shown and never matched on. */
 export interface BankLine {
   id: string;
@@ -13,6 +16,8 @@ export interface BankLine {
   receiver?: string;
   /** Fee PayPal charged on top of `amount`. */
   fee?: number;
+  /** PayPal's status for the item. Absent means "money moved" (hand-written lines). Only success and unclaimed settle. */
+  status?: PayoutStatus;
   memo?: string;
 }
 
@@ -79,6 +84,7 @@ export type ReasonCode =
   | "currency_mismatch"
   | "receiver_mismatch"
   | "receiver_unverified"
+  | "payout_not_settled"
   | "not_settled"
   | "invoice_ambiguous"
   | "invoice_mismatch";

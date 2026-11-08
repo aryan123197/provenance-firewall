@@ -51,6 +51,23 @@ Status: **Confirmed** = agreed by PayPal's documentation as summarised by search
 | Item events' `resource` has `payout_batch_id`, `transaction_status` and `payout_item` (`receiver`, `sender_item_id`, `amount`) | Consistent with PayPal's payout-item details response; the webhook envelope itself was not found | `parsePayPalEvent`. If a real event differs, an item event would fall through as unmatched drift, which is loud rather than silent |
 | `POST /v1/notifications/webhooks` with `url` and `event_types[].name`, https only | **Live** (register, list and delete worked); https-only is well known | `PayPalWebhooks.register` |
 
+## Reconciliation import (`packages/recon/src/paypal.ts`)
+
+Checked on 2026-11-08 against the live sandbox: two $1.00 payouts sent through the firewall, each read back with `GET /v1/payments/payouts/{payout_batch_id}`. The first response is recorded unedited as `packages/recon/src/fixtures/paypal-payout-batch.sandbox.json` and the mapper's tests are pinned to it. `pnpm recon:live-check` repeats the whole chain.
+
+| Assumption | Status | If wrong, look at |
+| --- | --- | --- |
+| The settlement lines come from the payout batch details (`items[]`), one line per item | **Live** (both payouts) | `bankLinesFromPayoutBatch` |
+| An item's `payout_batch_id` equals the `reference` the firewall stored for the payment | **Live**: identical in both runs | `bankLinesFromPayoutBatch`, `ReconStore.ledger` |
+| An item's `payout_item.sender_item_id` equals our `PayPal-Request-Id` (also `sender_batch_id`), stored as the payment's `requestId` | **Live**: identical in both runs | same |
+| Amounts and fees are decimal text (`"1.00"`, `payout_item_fee.value` `"0.25"`) | **Live** (a $1.00 payout carried a $0.25 fee); read with integer math | `parseMinorUnits` |
+| Each item has a `transaction_status`, and money has left our balance once it is `UNCLAIMED` | **Live for `UNCLAIMED`** (receiver was not a PayPal account; the item showed it while the batch was still `PROCESSING`). The other statuses are the adapter's `mapPayPalStatus` words and PayPal's documented ones: **not recorded** | `mapPayPalStatus`, the `payout_not_settled` rule in `match.ts` |
+| `time_processed` is on the item; `batch_header.time_completed` appears only after the whole batch finishes | **Live**: the second capture, taken while the batch was `PROCESSING`, had no `time_completed` | date fallback in the mapper |
+| The receiver is echoed exactly as sent | **Live** for a lowercase email; a differently cased echo has **not** been seen, and the matcher compares receivers exactly | `pair()` in `match.ts` |
+| A fully `SUCCESS` item for a registered receiver has the same shape | **Not recorded**: needs a sandbox personal account. Run `PFW_DEMO_RECEIVER=<its email> RECON_SAVE_FIXTURE=file.json pnpm recon:live-check` and add the recording | fixture, mapper |
+| Large batches are paginated | **Not checked**: batches the adapter sends have one item, and the mapper reads the page it is given | `bankLinesFromPayoutBatch` |
+| Transaction Search (`GET /v1/reporting/transactions`) is a usable settlement report | **Not usable here**: the sandbox app lacks the scope (403 `NOT_AUTHORIZED`). Enable Transaction Search on the app to try it; no mapper exists for it | none yet |
+
 ## Running the live checks yourself: what to do and what to watch
 
 Run `pnpm preflight` first. If your machine reaches the internet only through a proxy (some sandboxes and CI runners set `HTTPS_PROXY`), prefix it, `pnpm e2e` and the other live scripts with `NODE_USE_ENV_PROXY=1`: Node's built-in `fetch` ignores `HTTPS_PROXY` otherwise, and the failure looks like a blocked host (`ENOTFOUND`). It reports which variables are missing, whether the sandbox host is reachable from this environment, and whether PayPal accepts the credentials, without printing any secret.

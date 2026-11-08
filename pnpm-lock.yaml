@@ -172,6 +172,9 @@ importers:
 
   packages/recon:
     dependencies:
+      '@pfw/adapter':
+        specifier: workspace:*
+        version: link:../adapter
       '@pfw/core':
         specifier: workspace:*
         version: link:../core

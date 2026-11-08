@@ -97,6 +97,7 @@ export const RECON_REASON: Record<string, string> = {
   currency_mismatch: "Currency differs",
   receiver_mismatch: "Paid to a different account",
   receiver_unverified: "Line does not say who was paid",
+  payout_not_settled: "PayPal says the payout did not settle",
   not_settled: "Not settled yet",
   invoice_ambiguous: "More than one purchase order fits",
   invoice_mismatch: "Purchase order does not match",

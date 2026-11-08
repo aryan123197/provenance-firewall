@@ -5,6 +5,13 @@
   "license": "MIT",
   "type": "module",
   "description": "Close and reconciliation: match PayPal settlement lines to the ledger and purchase orders; ambiguity goes to a person, adjustments need approval",
-  "exports": { ".": "./src/index.ts" },
-  "dependencies": { "@pfw/core": "workspace:*", "@pfw/store": "workspace:*", "zod": "^4.6.7" }
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@pfw/adapter": "workspace:*",
+    "@pfw/core": "workspace:*",
+    "@pfw/store": "workspace:*",
+    "zod": "^4.6.7"
+  }
 }

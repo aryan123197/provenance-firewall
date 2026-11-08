@@ -81,6 +81,7 @@ const BankLineSchema = z
     date: z.string().refine((d) => Number.isFinite(Date.parse(d)), "not a valid ISO date"),
     receiver: text(254).optional(),
     fee: z.number().int().nonnegative().safe().optional(),
+    status: z.enum(["success", "pending", "failed", "unclaimed", "returned", "unknown"]).optional(),
     // Free text from outside: stored for the person reading it, bounded, and never matched on.
     memo: z.string().max(1000).optional(),
   })

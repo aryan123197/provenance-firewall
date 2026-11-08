@@ -1,0 +1,81 @@
+{
+  "_about": "Recorded verbatim from the PayPal sandbox on 2026-11-08: one $1.00 payout sent through the firewall's PayPalAdapter, then read back with GET /v1/payments/payouts/{payout_batch_id}. 'ledger' is what our side stored for it; 'batch' is PayPal's response, unedited. The receiver was not a PayPal account, so the item is UNCLAIMED (a fully successful item has not been recorded yet).",
+  "ledger": {
+    "reference": "FLE8RSLGUQE6L",
+    "requestId": "pfw-293e367afc9d97df02bc072ffbceea27",
+    "amount": 100,
+    "currency": "USD",
+    "receiver": "sb-pfwrecon-receiver@personal.example.com",
+    "createdAt": "2026-11-08T01:22:06.157Z"
+  },
+  "batch": {
+    "batch_header": {
+      "payout_batch_id": "FLE8RSLGUQE6L",
+      "batch_status": "SUCCESS",
+      "time_created": "2026-11-08T01:22:06Z",
+      "time_completed": "2026-11-08T01:22:30Z",
+      "sender_batch_header": {
+        "sender_batch_id": "pfw-293e367afc9d97df02bc072ffbceea27",
+        "email_subject": "Payment from Provenance Firewall"
+      },
+      "funding_source": "BALANCE",
+      "amount": {
+        "currency": "USD",
+        "value": "1.00"
+      },
+      "fees": {
+        "currency": "USD",
+        "value": "0.25"
+      }
+    },
+    "items": [
+      {
+        "payout_item_id": "XZ3W3HWQLKTMW",
+        "transaction_id": "9CB55513E2335232C",
+        "activity_id": "1K066814M6231503P",
+        "transaction_status": "UNCLAIMED",
+        "payout_item_fee": {
+          "currency": "USD",
+          "value": "0.25"
+        },
+        "payout_batch_id": "FLE8RSLGUQE6L",
+        "payout_item": {
+          "recipient_type": "EMAIL",
+          "amount": {
+            "currency": "USD",
+            "value": "1.00"
+          },
+          "note": "Payment to Acme Supplies",
+          "receiver": "sb-pfwrecon-receiver@personal.example.com",
+          "sender_item_id": "pfw-293e367afc9d97df02bc072ffbceea27",
+          "recipient_wallet": "PAYPAL",
+          "purpose": "GOODS"
+        },
+        "time_processed": "2026-11-08T01:22:22Z",
+        "errors": {
+          "name": "RECEIVER_UNREGISTERED",
+          "message": "The recipient for this payout does not have an account. A link to sign up for an account was sent to the recipient. However, if the recipient does not claim this payout within 30 days, the funds will be returned to your account.",
+          "information_link": "https://developer.paypal.com/docs/api/payments.payouts-batch/#errors",
+          "details": [],
+          "links": []
+        },
+        "links": [
+          {
+            "href": "https://api.sandbox.paypal.com/v1/payments/payouts-item/XZ3W3HWQLKTMW",
+            "rel": "item",
+            "method": "GET",
+            "encType": "application/json"
+          }
+        ]
+      }
+    ],
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v1/payments/payouts/FLE8RSLGUQE6L?page_size=1000&page=1",
+        "rel": "self",
+        "method": "GET",
+        "encType": "application/json"
+      }
+    ]
+  }
+}

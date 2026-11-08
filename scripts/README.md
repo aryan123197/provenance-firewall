@@ -6,6 +6,7 @@ Run from the repository root with `pnpm <name>`. The ones that talk to PayPal ne
 | --- | --- |
 | `pnpm preflight` | Reports which variables are missing, whether the sandbox host is reachable and whether PayPal accepts the credentials. Prints no secret. |
 | `pnpm sandbox:check` | Checks the whole product against the real sandbox: scopes, an injected invoice denied, one $1.00 payout, a restart-safe retry, webhooks, and whether Invoicing is enabled. Needs `PFW_DEMO_RECEIVER`. |
+| `pnpm recon:live-check` | Sends one $1.00 sandbox payout through the firewall, reads PayPal's payout batch details back, maps and imports them, and checks the payment and the line match. `RECON_SAVE_FIXTURE=file.json` records the response. Needs `PFW_DEMO_RECEIVER` (a sandbox personal account for a fully successful item). |
 | `pnpm e2e` | The scripted payment: attack, legitimate payment, retry. The attack step runs offline. |
 | `pnpm harness` | Regenerates `reports/scorecard.{md,json}` (deterministic, offline). |
 | `pnpm harness:llm` | The same scenarios with a real Claude agent. Needs `ANTHROPIC_API_KEY`; paid. |

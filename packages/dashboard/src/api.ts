@@ -190,7 +190,7 @@ export const api = {
   addPurchaseOrder: (po: { id: string; vendorId: string; amount: number; currency: string }, changedBy: string) =>
     post<{ ok: true }>("/api/registry/purchase-orders", { ...po, changedBy }),
   recon: () => request<ReconView>("/api/recon"),
-  reconImport: (lines: unknown, importedBy: string) => post<{ added: number; unchanged: number }>("/api/recon/bank-lines", { lines, importedBy }),
+  reconImport: (body: { lines?: unknown; payoutBatches?: unknown[] }, importedBy: string) => post<{ added: number; unchanged: number }>("/api/recon/bank-lines", { ...body, importedBy }),
   reconRun: (runBy: string) => post<{ proposed: AdjustmentRecord[] }>("/api/recon/run", { runBy }),
   reconConfirm: (bankLineId: string, ledgerKey: string, resolvedBy: string, note: string) =>
     post<{ ok: true }>("/api/recon/matches", { bankLineId, ledgerKey, resolvedBy, note: note || undefined }),
