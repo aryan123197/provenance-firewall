@@ -312,6 +312,14 @@ describe("simulate-drift (demo only, operator only)", () => {
     await d.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match" } });
     expect((await sim("mismatch", op, d)).json()).toMatchObject({ result: "drift", kind: "detail_mismatch" });
   });
+  test("an unclaimed payout matches our records, is not drift, and raises the payout-attention count", async () => {
+    const d = build({ demo: true });
+    expect((await sim("unclaimed", op, d)).statusCode).toBe(409);
+    await d.app.inject({ method: "POST", url: "/api/demo/run", headers: op, payload: { scenarioId: "legit-po-match" } });
+    expect((await sim("unclaimed", op, d)).json()).toMatchObject({ result: "matched", providerStatus: "unclaimed" });
+    const status = (await d.app.inject({ url: "/api/status" })).json() as { driftOpen: number; payoutsNeedingAttention: number };
+    expect(status).toMatchObject({ driftOpen: 0, payoutsNeedingAttention: 1 });
+  });
 });
 
 describe("rate limiting", () => {

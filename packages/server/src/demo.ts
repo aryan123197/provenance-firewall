@@ -97,9 +97,17 @@ export function registerDemo(app: FastifyInstance, deps: DemoDeps, guard: (req: 
 
   // Shows reconciliation without a live PayPal: report a payment we never authorized, or one that differs from what was authorized.
   let simSeq = 0;
-  app.post<{ Body: { kind?: "unauthorized" | "mismatch" } }>("/api/demo/simulate-drift", { preHandler: guard }, async (req, reply) => {
+  app.post<{ Body: { kind?: "unauthorized" | "mismatch" | "unclaimed" } }>("/api/demo/simulate-drift", { preHandler: guard }, async (req, reply) => {
     const { store } = deps.runtime();
     const id = `sim-${Date.now().toString(36)}-${++simSeq}`;
+    if (req.body?.kind === "unclaimed") {
+      // A payout PayPal could not deliver because the receiver has not claimed it (seen live): matches our records, but did not arrive as paid.
+      const paid = store.listDecisions({ limit: 200 }).find((d) => d.execution === "executed" && d.providerStatus !== "unclaimed");
+      const exec = paid ? store.getExecution(paid.idempotencyKey) : null;
+      if (!paid || !exec?.reference) return reply.code(409).send({ error: "Run a scenario that pays something first, then report it unclaimed." });
+      const receiver = (exec.payload as { receiver?: string } | undefined)?.receiver;
+      return store.recordProviderEvent({ id, type: "PAYMENT.PAYOUTS-ITEM.UNCLAIMED", reference: exec.reference, status: "unclaimed", amount: paid.amount, currency: paid.currency, ...(receiver ? { receiver } : {}) });
+    }
     if (req.body?.kind === "mismatch") {
       const paid = store.listDecisions({ limit: 200 }).find((d) => d.execution === "executed");
       const exec = paid ? store.getExecution(paid.idempotencyKey) : null;
