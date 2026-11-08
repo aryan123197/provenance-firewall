@@ -8,8 +8,8 @@ export interface MessagesClient {
   messages: { create(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> };
 }
 
-/** The model both features default to. Override with PFW_MODEL. */
-export const DEFAULT_MODEL = "claude-opus-5-5";
+/** The model both features default to (the one the live results in reports/scorecard-llm.md were measured with). Override with PFW_MODEL. */
+export const DEFAULT_MODEL = "claude-sonnet-5-5";
 export const modelFromEnv = (env: NodeJS.ProcessEnv = process.env) => env.PFW_MODEL ?? DEFAULT_MODEL;
 
 /**

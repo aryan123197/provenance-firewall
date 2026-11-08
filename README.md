@@ -133,7 +133,7 @@ In the demo, open **Live activity**, pick a scenario under *Try an attack* and r
 | `POLICY_PATH` | `policies/default.policy.yaml` | Active policy |
 | `REGISTRY_PATH` | none | JSON `{ vendors, purchaseOrders }`, the operator-maintained registry |
 | `OPERATOR_TOKEN` | none | Bearer token required to approve or reject |
-| `ANTHROPIC_API_KEY` | none | Enables the policy compiler and the live Claude agent. `PFW_MODEL` overrides the model (default `claude-opus-5-5`). |
+| `ANTHROPIC_API_KEY` | none | Enables the policy compiler and the live Claude agent. `PFW_MODEL` overrides the model (default `claude-sonnet-5-5`, the one the live results were measured with). |
 | `RATE_LIMIT_PER_MIN` | `240` | Requests per minute per client IP; `0` turns it off. Set `TRUST_PROXY=1` behind a proxy such as Render so real client addresses are used. |
 | `LLM_DAILY_CALLS` | `300` | Hard cap on Claude API calls per UTC day, across the policy compiler and the live agent. Calls past it return 429. Held in memory, so a restart resets it. |
 | `OPEN_OPERATOR` | off | `1` lets anyone approve or reject. Public demos on simulated or sandbox money only. |

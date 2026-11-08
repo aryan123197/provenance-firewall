@@ -69,7 +69,7 @@ describe("LlmAgent", () => {
     const { client, requests } = fakeClient([{ content: [text("nothing to do")] }]);
     await new LlmAgent({ client }).run([{ type: "document", id: "inv_1" }], tools().t);
     const req = requests[0]! as unknown as Record<string, unknown>;
-    expect(req.model).toBe("claude-opus-5-5");
+    expect(req.model).toBe("claude-sonnet-5-5");
     expect(AGENT_TOOLS.map((x) => x.name)).toEqual(["read_document", "find_vendor", "pay"]);
     for (const banned of ["tool_choice", "temperature", "top_p", "top_k", "thinking"]) expect(req[banned]).toBeUndefined();
     expect(JSON.stringify(req.messages)).toContain("inv_1");
@@ -169,7 +169,7 @@ describe("AnthropicPolicyCompiler", () => {
     const { client, requests } = fakeClient([reply(specOutput)]);
     await new AnthropicPolicyCompiler(client).compile("anything over $2k needs my approval", base);
     const req = requests[0]! as unknown as Record<string, unknown> & { output_config: { format: { type: string; schema: { required: string[] } } }; messages: { content: string }[] };
-    expect(req.model).toBe("claude-opus-5-5");
+    expect(req.model).toBe("claude-sonnet-5-5");
     expect(req.output_config.format.type).toBe("json_schema");
     expect(req.output_config.format.schema.required).toContain("unsupported");
     expect(req.messages[0]!.content).toContain('"approvalThreshold": 50000');
