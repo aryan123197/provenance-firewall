@@ -1,6 +1,6 @@
 # Submission kit
 
-Draft text and a shot list for the Devpost entry and the video. Everything here describes what the repository does today. Items marked **[fill after live run]** need the PayPal sandbox or a Claude API key, which have not been used yet, so do not paste in a number or a claim for them until you have run it.
+Draft text and a shot list for the Devpost entry and the video. Everything here describes what the repository does today. Items marked **[fill after live run]** need something that has not been run yet (a public deploy for signed webhooks, a real Slack workspace). The PayPal sandbox and Claude API have now been used and the markers for them are filled in; do not paste in a number or a claim for anything still marked until you have run it.
 
 ## Devpost description (draft)
 
@@ -27,7 +27,7 @@ The adapter calls the PayPal **Payouts** API to pay vendors (with `PayPal-Reques
 
 **Where the LLM is used**
 
-A Claude-driven procurement agent reads invoices and proposes payments through the firewall, and a compiler turns a plain-English policy into a patch of tunable thresholds. The LLM never decides whether money moves: the decision function is pure code, the agent's `pay` goes through it, and a compiled policy takes effect only after its tests pass and a person confirms. **[fill after live run: what you observed with a real model]**
+A Claude-driven procurement agent reads invoices and proposes payments through the firewall, and a compiler turns a plain-English policy into a patch of tunable thresholds. The LLM never decides whether money moves: the decision function is pure code, the agent's `pay` goes through it, and a compiled policy takes effect only after its tests pass and a person confirms. Observed with a real model (`claude-sonnet-5-5`, 26 scenarios, two full runs): it resisted the classic injection attacks on its own, and paid wrongly only where it lacked the facts (inflated totals against a purchase order, a switched currency, a vendor outside the allowlist, duplicates), which the firewall stopped every time. The README states this in full.
 
 **Results (committed scorecard, `reports/scorecard.md`)**
 
@@ -37,7 +37,7 @@ A Claude-driven procurement agent reads invoices and proposes payments through t
 | Legitimate payments wrongly denied (6) | 0 | 0 |
 | Duplicate payouts | 2 | 0 |
 
-Say plainly in the entry what this measures: the benchmark agent is a deterministic stand-in that obeys any instruction in a document (the worst case, and reproducible), and payments in the benchmark go to an in-process fake of the Payouts API. It measures the firewall, not a real model. **[fill after live run: the same table from `pnpm harness:llm`, with the model name]**
+Say plainly in the entry what this measures: the benchmark agent is a deterministic stand-in that obeys any instruction in a document (the worst case, and reproducible), and payments in the benchmark go to an in-process fake of the Payouts API. It measures the firewall, not a real model. The same table with a real model (`claude-sonnet-5-5`, one run per scenario, model output varies): the unprotected agent moved money in 6 of 20 attacks ($2,670), the firewalled one in 0 of 20 ($0), with 0 of 6 legitimate payments wrongly denied (an earlier run, before one scenario's scoring was corrected, showed 7 and 1; the 1 was a scoring error). Say that the model resisted injections by itself and failed on inflated amounts, a switched currency, an allowlist violation and duplicates, because that is what happened.
 
 **How we built it / what we are proud of**
 
@@ -57,7 +57,7 @@ Use demo mode (`pnpm dev:demo`, or the Render URL) and click through in this ord
 | 0:15 to 1:05 | **Try an attack** → *Invoice note redirects payment* → Run it. Left pane: unprotected agent, **Lost $450.00**, receiver `vendor-support@evil.example`. Right pane: same agent, **Denied · Payee changed**, no money moved. | "Same agent, same invoice. The unprotected one pays the attacker. Behind the firewall it is denied." |
 | 1:05 to 1:30 | Click the denied link → the decision page, **Where each field came from**: the field table, payee and account in red as untrusted, the sentence "Payee came from the invoice text, which is untrusted content", the rule list, then the audit trail with "Chain verified". | "It tracks where every field came from, so persuasion cannot change the outcome." |
 | 1:30 to 1:55 | Run *Large invoice that needs a person* → **Approvals** → type a name → **Approve and pay $800.00** → the green confirmation. | "Real work still gets done: a person approves, once, bound to this exact payment." |
-| 1:55 to 2:20 | **Policy & scorecard** → type the example sentence → Compile → show the diff, any lint warning and the "tests passed" line → Confirm. *(needs a Claude key; if you have none, skip this row and say so)* **[fill after live run]** | "Policies are written in English, compiled to rules, tested, and only activated when you confirm." |
+| 1:55 to 2:20 | **Policy & scorecard** → type the example sentence → Compile → show the diff, any lint warning and the "tests passed" line → Confirm. *(needs a Claude key; if you have none, skip this row and say so)* (run live with `claude-sonnet-5-5`: 30 of 30 tests passed on the example sentence) | "Policies are written in English, compiled to rules, tested, and only activated when you confirm." |
 | 2:20 to 2:45 | Scorecard: the bars and the table. Point at the one scenario where the firewalled side still loses $800. | "Twenty attacks: the unprotected agent lost money in all of them. The firewall in one, bounded by a daily cap. Zero legitimate payments wrongly denied." |
 | 2:45 to 3:00 | The repo and the live URL | "Open source, running now." |
 
