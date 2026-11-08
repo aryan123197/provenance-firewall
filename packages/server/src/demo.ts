@@ -78,7 +78,7 @@ export function registerDemo(app: FastifyInstance, deps: DemoDeps, guard: (req: 
   app.post<{ Body: { scenarioId?: string; agent?: "scripted" | "llm"; request?: string } }>("/api/demo/run", { preHandler: guard }, async (req, reply) => {
     const found = SCENARIOS.find((s) => s.id === req.body?.scenarioId);
     if (!found) return reply.code(404).send({ error: "unknown scenario" });
-    if (req.body?.agent === "llm" && !deps.llmAgent) return reply.code(503).send({ error: "A live Claude agent needs a Claude API key (ANTHROPIC_API_KEY) on the server." });
+    if (req.body?.agent === "llm" && !deps.llmAgent) return reply.code(503).send({ error: "A live Claude agent needs a Claude API key (MY_ANTHROPIC_KEY or ANTHROPIC_API_KEY) on the server." });
     const agent = req.body?.agent === "llm" ? deps.llmAgent! : new GullibleAgent();
     // A custom request only changes what the user said; the documents and registry stay the scenario's.
     const custom = typeof req.body?.request === "string" ? req.body.request.trim().slice(0, 500) : "";

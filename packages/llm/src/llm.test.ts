@@ -3,7 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, test } from "vitest";
 import { applyPatch, diffPolicy, lintPolicy, loadPolicy, runIntentExamples, runPolicyTests } from "@pfw/core";
 import type { AgentTools, PayArgs, PayResult } from "@pfw/harness";
-import { AGENT_TOOLS, AnthropicPolicyCompiler, LlmAgent, LlmBudgetError, LlmRefusalError, toCompilerOutput, withDailyBudget, type MessagesClient } from "./index";
+import { AGENT_TOOLS, ANTHROPIC_API_URL, AnthropicPolicyCompiler, createClient, hasClaudeKey, LlmAgent, LlmBudgetError, LlmRefusalError, toCompilerOutput, withDailyBudget, type MessagesClient } from "./index";
 
 const base = loadPolicy(readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8"));
 
@@ -235,5 +235,24 @@ describe("withDailyBudget", () => {
     const c = withDailyBudget(fakeClient([{ stop_reason: "tool_use", content: [toolUse("t1", "find_vendor", { name: "x" })] }]).client, 1);
     await expect(new LlmAgent({ client: c }).run([], tools().t)).rejects.toBeInstanceOf(LlmBudgetError);
     await expect(new AnthropicPolicyCompiler(withDailyBudget(ok(), 0)).compile("x", base)).rejects.toBeInstanceOf(LlmBudgetError);
+  });
+});
+
+describe("createClient", () => {
+  const conf = (c: unknown) => c as { apiKey: string | null; baseURL: string };
+
+  test("returns undefined without any key", () => {
+    expect(createClient({})).toBeUndefined();
+    expect(hasClaudeKey({ MY_ANTHROPIC_KEY: "  " })).toBe(false);
+  });
+
+  test("MY_ANTHROPIC_KEY wins and goes to the public API, not ANTHROPIC_BASE_URL", () => {
+    const c = conf(createClient({ MY_ANTHROPIC_KEY: "sk-ant-own", ANTHROPIC_API_KEY: "sk-ant-other", ANTHROPIC_BASE_URL: "http://host-proxy" }));
+    expect(c.apiKey).toBe("sk-ant-own");
+    expect(c.baseURL).toBe(ANTHROPIC_API_URL);
+  });
+
+  test("MY_ANTHROPIC_BASE_URL overrides the address", () => {
+    expect(conf(createClient({ MY_ANTHROPIC_KEY: "k", MY_ANTHROPIC_BASE_URL: "https://gw.example" })).baseURL).toBe("https://gw.example");
   });
 });

@@ -2,7 +2,7 @@
  *   pnpm harness:llm [scenario-id,scenario-id,...]
  *
  * Runs the scenarios with a real Claude agent behind the same tools, on both sides (the unprotected baseline and the
- * firewall), and writes reports/scorecard-llm.{md,json}. Needs ANTHROPIC_API_KEY. This calls the paid API: each scenario
+ * firewall), and writes reports/scorecard-llm.{md,json}. Needs MY_ANTHROPIC_KEY or ANTHROPIC_API_KEY. This calls the paid API: each scenario
  * runs the agent twice, so a full run makes dozens of requests. Results vary from run to run, so this report is not
  * compared in CI the way the scripted one is.
  */
@@ -13,7 +13,7 @@ import { LlmAgent, createClient, modelFromEnv } from "@pfw/llm";
 
 const client = createClient();
 if (!client) {
-  console.error("No Claude credentials found. Set ANTHROPIC_API_KEY (or run `ant auth login`) and try again.");
+  console.error("No Claude credentials found. Set MY_ANTHROPIC_KEY or ANTHROPIC_API_KEY (or run `ant auth login`) and try again.");
   process.exit(2);
 }
 
