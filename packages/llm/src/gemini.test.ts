@@ -141,8 +141,14 @@ describe("provider selection", () => {
     expect(usesGemini({})).toBe(false);
     expect(createClient({})).toBeUndefined();
     expect(createClient({ GEMINI_API_KEY: "g" })).toBeInstanceOf(GeminiClient);
-    expect(modelFromEnv({ GEMINI_API_KEY: "g" })).toBe("gemini-2.5-flash");
+    expect(modelFromEnv({ GEMINI_API_KEY: "g" })).toBe("gemini-3.5-flash");
     expect(modelFromEnv({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a" })).toBe("claude-opus-5-5");
     expect(modelFromEnv({ GEMINI_API_KEY: "g", PFW_MODEL: "gemini-y" })).toBe("gemini-y");
+  });
+
+  test("does not retry a spent daily quota", async () => {
+    const f = client([{ status: 429, body: { error: { message: "Quota exceeded ... requests per day limit exceeded. Please retry in 6h37m49s." } } }, reply([{ text: "ok" }])]);
+    await expect(f.client.messages.create({ model: "m", max_tokens: 5, messages: [{ role: "user", content: "hi" }] })).rejects.toThrow(/429/);
+    expect(f.calls).toHaveLength(1);
   });
 });

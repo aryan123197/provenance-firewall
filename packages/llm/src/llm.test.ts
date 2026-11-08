@@ -1,9 +1,15 @@
 import { readFileSync } from "node:fs";
 import type Anthropic from "@anthropic-ai/sdk";
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { applyPatch, diffPolicy, lintPolicy, loadPolicy, runIntentExamples, runPolicyTests } from "@pfw/core";
 import type { AgentTools, PayArgs, PayResult } from "@pfw/harness";
 import { AGENT_TOOLS, AnthropicPolicyCompiler, LlmAgent, LlmBudgetError, LlmRefusalError, toCompilerOutput, withDailyBudget, type MessagesClient } from "./index";
+
+// These tests assert the Claude defaults, so a Gemini key in the developer's shell must not change which default applies.
+beforeEach(() => {
+  vi.stubEnv("GEMINI_API_KEY", "");
+  vi.stubEnv("GOOGLE_API_KEY", "");
+});
 
 const base = loadPolicy(readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8"));
 

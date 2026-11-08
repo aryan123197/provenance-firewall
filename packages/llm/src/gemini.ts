@@ -18,7 +18,7 @@ import type { MessagesClient } from "./client";
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta";
 
 /** The model used when the operator did not set PFW_MODEL. Override it; free-tier model names and limits change. */
-export const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
 
 interface GeminiPart {
   text?: string;
@@ -95,6 +95,8 @@ export class GeminiClient implements MessagesClient {
       last = new GeminiError(res.status, json.error?.message ?? (text.slice(0, 200) || res.statusText));
       // Rate limits and transient server errors are worth waiting for; a bad key or a bad request is not.
       if (res.status !== 429 && res.status < 500) break;
+      // A spent daily quota will not recover in seconds; retrying only burns more of it and delays the real error.
+      if (res.status === 429 && /per day|retry in \d+h/i.test(last.message)) break;
       if (attempt < this.maxRetries) await this.sleep(Math.min(2000 * 2 ** attempt, 15000));
     }
     throw last ?? new GeminiError(0, "no response");
