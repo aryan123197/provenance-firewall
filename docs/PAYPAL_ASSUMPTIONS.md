@@ -41,6 +41,17 @@ Status: **Confirmed** = agreed by PayPal's documentation as summarised by search
 | List is `GET /v2/invoicing/invoices?page&page_size&total_required` returning `items` | **Live** | `list` |
 | An API client can **read** invoices through `GET` | **Live** for invoices the app's own account issued; unknown for invoices a vendor issued *to* you | invoices you issued are readable; whether a recipient's app can read them is unverified, and the demo script reads invoices the same account created |
 
+## Orders (`packages/adapter/src/orders.ts`)
+
+| Assumption | Status | If wrong, look at |
+| --- | --- | --- |
+| `POST /v2/checkout/orders` creates an order and answers `PAYER_ACTION_REQUIRED` with a `payer-action` link | **Live**: the status code is 200, not 201 | `PayPalOrdersAdapter.execute` |
+| `payee.email_address`, `amount` and `reference_id` come back on `GET /v2/checkout/orders/{id}` | **Live** | `assertMatches` |
+| Capturing before the buyer approves is refused | **Live**: `422 ORDER_NOT_APPROVED` | `capture` |
+| A repeated `PayPal-Request-Id` returns the original order | **Live**, including when the new body differs, so the result is checked against the authorized intent | `execute` |
+| Statuses `CREATED`, `SAVED`, `APPROVED`, `PAYER_ACTION_REQUIRED`, `COMPLETED`, `VOIDED` | `PAYER_ACTION_REQUIRED` seen live; the rest from memory | `mapOrderStatus` |
+| `POST .../capture` after approval answers 2xx with `status: COMPLETED` | From memory; needs a person to approve in the sandbox | `capture` |
+
 ## Webhooks (`packages/adapter/src/paypal.ts`, `webhooks.ts`)
 
 | Assumption | Status | If wrong, look at |

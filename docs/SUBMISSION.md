@@ -23,7 +23,7 @@ Provenance Firewall is a policy layer between an LLM agent and PayPal that track
 
 **Where PayPal is used**
 
-The adapter calls the PayPal **Payouts** API to pay vendors (with `PayPal-Request-Id` for exactly-once), **Invoicing** to read the invoices an agent processes (every free-text field is treated as untrusted, and the red-team scenarios put injections there), OAuth, **webhook signature verification**, and webhook registration. Payout and invoice webhook events feed reconciliation. **[fill after live run: which of these you exercised against the sandbox]**
+The adapter calls the PayPal **Payouts** API to pay vendors (with `PayPal-Request-Id` for exactly-once), **Invoicing** to read the invoices an agent processes (every free-text field is treated as untrusted, and the red-team scenarios put injections there), OAuth, **webhook signature verification**, and webhook registration. Payout and invoice webhook events feed reconciliation. **Orders v2** covers an agent buying from a merchant: the firewall decides on the merchant, amount and currency, the order is created, and PayPal waits for the buyer to approve it before any capture. Exercised against the real sandbox (2026-11-07 and 08): Payouts (create, read, duplicate recovery), Invoicing (create, send, list, read, the injected note visible to the agent), Orders (create, replay, capture refused before approval), and webhook registration plus rejection of a forged event. **[fill after a public deploy: a genuinely signed webhook delivery has not been seen]**
 
 **Where the LLM is used**
 
@@ -45,7 +45,7 @@ TypeScript monorepo, SQLite, React with AG Grid for the audit and approval table
 
 **What's next**
 
-Orders/Checkout for agentic purchases; a second payment adapter; per-user operator accounts.
+Orders/Checkout in the server and dashboard (the adapter and a live check exist, and the buyer approval step is the part left); a second payment adapter; per-user operator accounts.
 
 ## Video: shot list (under 3:00)
 

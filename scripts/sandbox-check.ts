@@ -8,13 +8,13 @@
  *
  * Steps: 1 credentials and scopes; 2 an injected invoice is denied before PayPal is contacted; 3 a legitimate payment is paid;
  * 4 the same payment resubmitted by a "restarted" firewall (empty store, same request) resolves to the same payout, not a second;
- * 4b the payout's status is read back by polling (no webhook needed); 5 webhook register, list, forged-event rejection, delete; 6 whether Invoicing is enabled and, if so, that an injected invoice note and amount survive a create-and-read round trip.
+ * 4b the payout's status is read back by polling (no webhook needed); 4c an Orders purchase waits for the buyer and cannot be captured before they approve; 5 webhook register, list, forged-event rejection, delete; 6 whether Invoicing is enabled and, if so, that an injected invoice note and amount survive a create-and-read round trip.
  * Each step prints PASS, FAIL or SKIP with a reason. Exit code 1 if any step fails; a skipped step is not a failure.
  */
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { ProvenanceContext, loadPolicy } from "@pfw/core";
-import { Authority, PAYPAL_SANDBOX_URL, PayPalAdapter, PayPalInvoices, PayPalWebhooks } from "@pfw/adapter";
+import { Authority, PAYPAL_SANDBOX_URL, PayPalAdapter, PayPalInvoices, PayPalOrdersAdapter, PayPalWebhooks } from "@pfw/adapter";
 import { Store } from "@pfw/store";
 import { Firewall } from "@pfw/firewall";
 
@@ -131,6 +131,35 @@ else {
   } catch (e) {
     fail("4b status polling", msg(e));
   }
+}
+
+// 4c. Orders: an agent buying from a merchant. The firewall allows it, PayPal creates the order and waits for the BUYER; capture is refused until then.
+try {
+  const store = new Store();
+  store.upsertVendor({ id: "acme", name: "Acme Supplies", account: receiver, category: "office_supplies" });
+  store.addPurchaseOrder({ id: "po_ord", vendorId: "acme", amount: 100, currency: "USD" });
+  const orders = new PayPalOrdersAdapter({ clientId, clientSecret, authority, fetch: countingFetch });
+  const firewall = new Firewall({ store, adapter: orders, authority, policy });
+  const order = { ...base, idempotencyKey: `chk-order-${run}`, payee: { handle: "vendor:acme#name" }, account: { handle: "vendor:acme#account" }, amount: { handle: "invoice:chk#total" } };
+  const r = await firewall.submit(order, ctx);
+  if (r.status !== "executed") fail("4c orders", `expected executed, got ${r.status}`);
+  else {
+    const again = await firewall.submit(order, ctx);
+    const standalone = await new PayPalOrdersAdapter({ clientId, clientSecret, authority }).status(r.receipt.reference);
+    let refused = "";
+    try {
+      await orders.capture(r.receipt.reference, { amount: 100, currency: "USD", receiver });
+    } catch (e) {
+      refused = msg(e);
+    }
+    if (!r.receipt.approvalUrl) fail("4c orders", "no link for the buyer to approve");
+    else if (standalone !== "pending") fail("4c orders", `expected pending, PayPal says ${standalone}`);
+    else if (!(again.status === "executed" && again.receipt.reference === r.receipt.reference)) fail("4c orders", "a resubmission did not resolve to the same order");
+    else if (!/buyer has not approved/.test(refused)) fail("4c orders", `capture before the buyer approved was not refused: ${refused || "it went through"}`);
+    else pass("4c orders", `order ${r.receipt.reference} created, waiting for the buyer (${r.receipt.approvalUrl}); retry resolves to the same order; capture refused until approved`);
+  }
+} catch (e) {
+  fail("4c orders", msg(e));
 }
 
 // 5. Webhooks: register a throwaway endpoint, list it, send a forged event for verification, delete it.

@@ -1,8 +1,16 @@
-# Orders / Checkout: design note (not implemented)
+# Orders / Checkout: design note and what was built
 
-The spec lists an Orders path for agents buying goods from a merchant as a should-have. It is not built. This note records why, and how it would fit, so it is a small step once there is a sandbox to test against rather than a rewrite.
+`PayPalOrdersAdapter` (`packages/adapter/src/orders.ts`) now implements the create, status and guarded-capture path below and has run against the live sandbox. It is **not yet wired into the server or dashboard**: nothing calls `capture` from a return-URL handler or a webhook, and the dashboard does not show "waiting for the buyer". The rest of this note was written before the sandbox could be reached; the section "What the live sandbox showed" says where it was right and where it was not.
 
-## Why it was left out
+## What the live sandbox showed (2026-11-08)
+
+- `POST /v2/checkout/orders` answered **200** (not 201) with `status: PAYER_ACTION_REQUIRED` and links including `rel: payer-action` (`https://www.sandbox.paypal.com/checkoutnow?token=<id>`). The app's token carries the Orders scopes.
+- `GET /v2/checkout/orders/{id}` returns `purchase_units[0].amount`, `payee.email_address` and the same links.
+- **Capturing an order the buyer has not approved is `422 ORDER_NOT_APPROVED`.** The buyer approval is a real second gate; the API has no call that approves for them.
+- **A repeated `PayPal-Request-Id` returns the original order, even when the body differs** (same id back with a $99.00 body after a $13.00 one). So `execute` reads the order back and refuses to report a receipt unless its amount, currency and merchant are the authorized ones.
+- Not checked live: a full approve-then-capture (it needs a person to approve in the sandbox buyer account), and the capture and approval webhook events.
+
+## Why it was left out (the original reasoning)
 
 PayPal's Orders v2 flow, as its documentation describes it (confirmed through search summaries; I could not read the reference or call the API):
 
