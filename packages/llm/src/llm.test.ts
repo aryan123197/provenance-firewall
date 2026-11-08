@@ -3,12 +3,15 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { applyPatch, diffPolicy, lintPolicy, loadPolicy, runIntentExamples, runPolicyTests } from "@pfw/core";
 import type { AgentTools, PayArgs, PayResult } from "@pfw/harness";
-import { AGENT_TOOLS, AnthropicPolicyCompiler, LlmAgent, LlmBudgetError, LlmRefusalError, toCompilerOutput, withDailyBudget, type MessagesClient } from "./index";
+import { AGENT_TOOLS, AnthropicPolicyCompiler, LlmAgent, LlmBudgetError, LlmRefusalError, modelFromEnv, toCompilerOutput, withDailyBudget, type MessagesClient } from "./index";
 
 // These tests assert the Claude defaults, so a Gemini key in the developer's shell must not change which default applies.
 beforeEach(() => {
   vi.stubEnv("GEMINI_API_KEY", "");
   vi.stubEnv("GOOGLE_API_KEY", "");
+  vi.stubEnv("PFW_MODEL", "");
+  vi.stubEnv("PFW_AGENT_MODEL", "");
+  vi.stubEnv("PFW_COMPILER_MODEL", "");
 });
 
 const base = loadPolicy(readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8"));
@@ -73,7 +76,7 @@ describe("LlmAgent", () => {
     const { client, requests } = fakeClient([{ content: [text("nothing to do")] }]);
     await new LlmAgent({ client }).run([{ type: "document", id: "inv_1" }], tools().t);
     const req = requests[0]! as unknown as Record<string, unknown>;
-    expect(req.model).toBe("claude-opus-5-5");
+    expect(req.model).toBe("claude-sonnet-5-5");
     expect(AGENT_TOOLS.map((x) => x.name)).toEqual(["read_document", "find_vendor", "pay"]);
     for (const banned of ["tool_choice", "temperature", "top_p", "top_k", "thinking"]) expect(req[banned]).toBeUndefined();
     expect(JSON.stringify(req.messages)).toContain("inv_1");
@@ -173,7 +176,7 @@ describe("AnthropicPolicyCompiler", () => {
     const { client, requests } = fakeClient([reply(specOutput)]);
     await new AnthropicPolicyCompiler(client).compile("anything over $2k needs my approval", base);
     const req = requests[0]! as unknown as Record<string, unknown> & { output_config: { format: { type: string; schema: { required: string[] } } }; messages: { content: string }[] };
-    expect(req.model).toBe("claude-opus-5-5");
+    expect(req.model).toBe("claude-sonnet-5-5");
     expect(req.output_config.format.type).toBe("json_schema");
     expect(req.output_config.format.schema.required).toContain("unsupported");
     expect(req.messages[0]!.content).toContain('"approvalThreshold": 50000');
@@ -241,5 +244,14 @@ describe("withDailyBudget", () => {
     const c = withDailyBudget(fakeClient([{ stop_reason: "tool_use", content: [toolUse("t1", "find_vendor", { name: "x" })] }]).client, 1);
     await expect(new LlmAgent({ client: c }).run([], tools().t)).rejects.toBeInstanceOf(LlmBudgetError);
     await expect(new AnthropicPolicyCompiler(withDailyBudget(ok(), 0)).compile("x", base)).rejects.toBeInstanceOf(LlmBudgetError);
+  });
+});
+
+describe("model selection", () => {
+  test("a per-feature override beats PFW_MODEL, which beats the Sonnet default", () => {
+    expect(modelFromEnv({})).toBe("claude-sonnet-5-5");
+    expect(modelFromEnv({ PFW_MODEL: "claude-haiku-5-5" }, "agent")).toBe("claude-haiku-5-5");
+    expect(modelFromEnv({ PFW_MODEL: "x", PFW_AGENT_MODEL: "claude-haiku-5-5" }, "agent")).toBe("claude-haiku-5-5");
+    expect(modelFromEnv({ PFW_MODEL: "x", PFW_AGENT_MODEL: "claude-haiku-5-5" }, "compiler")).toBe("x");
   });
 });

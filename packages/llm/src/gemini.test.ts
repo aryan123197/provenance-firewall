@@ -142,7 +142,7 @@ describe("provider selection", () => {
     expect(createClient({})).toBeUndefined();
     expect(createClient({ GEMINI_API_KEY: "g" })).toBeInstanceOf(GeminiClient);
     expect(modelFromEnv({ GEMINI_API_KEY: "g" })).toBe("gemini-3.5-flash");
-    expect(modelFromEnv({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a" })).toBe("claude-opus-5-5");
+    expect(modelFromEnv({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a" })).toBe("claude-sonnet-5-5");
     expect(modelFromEnv({ GEMINI_API_KEY: "g", PFW_MODEL: "gemini-y" })).toBe("gemini-y");
   });
 

@@ -6,15 +6,16 @@ export interface MessagesClient {
   messages: { create(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> };
 }
 
-/** The model both features default to. Override with PFW_MODEL. */
-export const DEFAULT_MODEL = "claude-opus-5-5";
+/** The model both features default to. Override with PFW_MODEL, or per feature with PFW_AGENT_MODEL / PFW_COMPILER_MODEL (for example claude-haiku-5-5 for the live agent). */
+export const DEFAULT_MODEL = "claude-sonnet-5-5";
 
 const hasAnthropic = (env: NodeJS.ProcessEnv) => Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN);
 const geminiKey = (env: NodeJS.ProcessEnv) => env.GEMINI_API_KEY || env.GOOGLE_API_KEY;
 /** A Gemini key is used only when no Anthropic credential is set, so adding one never changes an existing Claude setup. */
 export const usesGemini = (env: NodeJS.ProcessEnv = process.env) => !hasAnthropic(env) && Boolean(geminiKey(env));
 
-export const modelFromEnv = (env: NodeJS.ProcessEnv = process.env) => env.PFW_MODEL ?? (usesGemini(env) ? DEFAULT_GEMINI_MODEL : DEFAULT_MODEL);
+export const modelFromEnv = (env: NodeJS.ProcessEnv = process.env, feature?: "agent" | "compiler") =>
+  (feature === "agent" ? env.PFW_AGENT_MODEL : feature === "compiler" ? env.PFW_COMPILER_MODEL : undefined) || env.PFW_MODEL || (usesGemini(env) ? DEFAULT_GEMINI_MODEL : DEFAULT_MODEL);
 
 /**
  * Credentials come from the environment (ANTHROPIC_API_KEY, or an `ant auth login` profile; failing that GEMINI_API_KEY or
