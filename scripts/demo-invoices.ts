@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { loadPolicy } from "@pfw/core";
 import { PayPalInvoices } from "@pfw/adapter";
-import { GullibleAgent, runAll, scenarioFromInvoices } from "@pfw/harness";
+import { GullibleAgent, runAll, scenarioFromInvoices, withVendorAccount } from "@pfw/harness";
 
 const { PAYPAL_CLIENT_ID: clientId, PAYPAL_CLIENT_SECRET: clientSecret, PFW_INVOICER_EMAIL: issuer } = process.env;
 const args = process.argv.slice(2);
@@ -27,7 +27,7 @@ for (const r of fetched) console.log(`${r.id}: ${r.vendorName} · ${(r.total / 1
 const vendorAccount = issuer ?? fetched.find((r) => r.remitTo)?.remitTo ?? "acme@sandbox.example";
 // A real sandbox invoice does not state the issuer's email (seen live): payment goes to the issuer implicitly. So where it is absent,
 // the invoice is treated as asking for the registered vendor's own account; where an invoice does state one, that is kept as is.
-const records = fetched.map((r) => (r.remitTo ? r : { ...r, remitTo: vendorAccount }));
+const records = withVendorAccount(fetched, vendorAccount);
 if (fetched.some((r) => !r.remitTo)) console.log("(PayPal does not return the issuer's email on these invoices, so they are treated as payable to the registered vendor's account.)");
 const vendor = { id: "acme-live", name: "Acme Supplies", account: vendorAccount, category: "office_supplies" };
 const scenario = scenarioFromInvoices(records, {

@@ -87,6 +87,7 @@ pnpm dev:demo              # http://localhost:3000, simulated PayPal, demo scena
 pnpm harness:llm           # same scenarios with a real Claude agent (needs ANTHROPIC_API_KEY; paid API calls)
 pnpm seed:invoices         # create a clean and an injected invoice in your PayPal sandbox (needs credentials)
 pnpm demo:invoices <ids>   # read them back and compare the unprotected agent with the firewalled one
+pnpm demo:live <ids>        # the whole chain on real PayPal: invoices read from the sandbox, the firewall, real sandbox payouts for the allowed ones (needs seeded invoices)
 pnpm e2e                   # scripted payment (attack step runs offline; payout step needs sandbox credentials)
 pnpm sandbox:check         # end-to-end check against the real PayPal sandbox: credentials, attack denied, $1 payout, restart-safe retry, webhooks, Invoicing
 ```
