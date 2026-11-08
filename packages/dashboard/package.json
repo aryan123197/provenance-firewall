@@ -19,6 +19,7 @@
   "devDependencies": {
     "@pfw/core": "workspace:*",
     "@pfw/harness": "workspace:*",
+    "@pfw/recon": "workspace:*",
     "@pfw/store": "workspace:*",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

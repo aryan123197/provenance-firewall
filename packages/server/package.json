@@ -15,6 +15,7 @@
     "@pfw/firewall": "workspace:*",
     "@pfw/harness": "workspace:*",
     "@pfw/llm": "workspace:*",
+    "@pfw/recon": "workspace:*",
     "@pfw/store": "workspace:*",
     "fastify": "^5.12.7",
     "zod": "^4.6.7"

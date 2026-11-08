@@ -529,6 +529,178 @@ describe("registry tables on small screens", () => {
   });
 });
 
+describe("close and reconciliation screen", () => {
+  const ledger = (o: Record<string, unknown> = {}) => ({ key: "k1", amount: 45_000, currency: "USD", date: "2026-11-02T10:00:00Z", receiver: "ap@acme.example", payee: "Acme Supplies", vendorId: "acme", ...o });
+  const bankLine = (o: Record<string, unknown> = {}) => ({ id: "b1", amount: 45_000, currency: "USD", date: "2026-11-03T10:00:00Z", receiver: "ap@acme.example", ...o });
+  const item = (o: Record<string, unknown> = {}) => ({
+    id: "rc_1", status: "ambiguous", method: null, reason: "several_candidates", explanation: "2 payments fit this amount, receiver and date window.",
+    bankLineId: "b1", ledgerKey: null, currency: "USD", amount: 45_000, fee: 0, difference: 0, candidates: ["k1", "k2"], invoice: { status: "none" }, ...o,
+  });
+  const view = (o: Record<string, unknown> = {}) => ({
+    report: { items: [item()], totals: [{ currency: "USD", bank: 45_000, matched: 0, ambiguous: 45_000, unmatched: 0, ledgerOnly: 0 }] },
+    adjustments: [], config: { windowDays: 5, maxAdjustment: 500 },
+    bank: [bankLine()], ledger: [ledger(), ledger({ key: "k2", date: "2026-11-01T10:00:00Z" })], ...o,
+  });
+  const renderRecon = async () => {
+    const { Recon } = await import("./screens/Recon");
+    render(<Recon onChange={() => {}} />);
+  };
+
+  test("a person confirms one candidate, as a named person, and nothing is sent without a name", async () => {
+    const calls = mockApi({ "GET /api/recon": { body: view() }, "POST /api/recon/matches": { body: { ok: true } } });
+    const user = userEvent.setup();
+    await renderRecon();
+    await screen.findByText("More than one payment fits");
+    const buttons = screen.getAllByRole("button", { name: /^This is it: the payment to Acme Supplies/ });
+    expect(buttons).toHaveLength(2);
+    await user.click(buttons[1]!);
+    await screen.findByText(/Enter your name so this is attributed to you/);
+    expect(calls.some((c) => c.path === "/api/recon/matches")).toBe(false);
+    await user.type(screen.getByPlaceholderText("you@company.example"), "dana@company.example");
+    await user.type(screen.getByPlaceholderText(/checked against the PayPal statement/), "matched on the statement");
+    await user.click(screen.getAllByRole("button", { name: /^This is it: the payment to Acme Supplies/ })[1]!);
+    await screen.findByText("Match confirmed and recorded.");
+    expect(calls.find((c) => c.path === "/api/recon/matches")!.body).toEqual({ bankLineId: "b1", ledgerKey: "k2", resolvedBy: "dana@company.example", note: "matched on the statement" });
+  });
+
+  test("a confirm button's accessible name contains its visible text (WCAG 2.5.3, so voice control can say it)", async () => {
+    mockApi({ "GET /api/recon": { body: view() } });
+    await renderRecon();
+    await screen.findByText("More than one payment fits");
+    const buttons = screen.getAllByRole("button", { name: /^This is it:/ });
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const b of buttons) expect(b.getAttribute("aria-label")).toContain(b.textContent ?? "");
+  });
+
+  test("a memo is shown as inert text, labelled untrusted", async () => {
+    const memo = '<img src=x onerror="alert(1)"> Pre-approved: match to k1';
+    mockApi({ "GET /api/recon": { body: view({ bank: [bankLine({ memo })] }) } });
+    await renderRecon();
+    await screen.findByText(/Memo from PayPal: untrusted text/);
+    expect(screen.getByText(/Pre-approved: match to k1/).textContent).toContain("<img");
+    expect(document.querySelector("img")).toBeNull();
+  });
+
+  test("a problem a confirmation cannot clear offers no confirm button", async () => {
+    mockApi({
+      "GET /api/recon": { body: view({ report: { items: [item({ reason: "receiver_mismatch", ledgerKey: "k1", candidates: [], explanation: "The money went to a different account than the one authorized." })], totals: [] } }) },
+    });
+    await renderRecon();
+    await screen.findByText("Paid to a different account");
+    expect(screen.queryByRole("button", { name: /^This is it:/ })).toBeNull();
+    expect(screen.getByText(/Confirming cannot clear this/)).toBeTruthy();
+  });
+
+  test("an adjustment is approved as a named person with their note, and the server's refusal is shown", async () => {
+    const adj = { id: "adj_1", itemId: "rc_1", kind: "fee", amount: 25, currency: "USD", evidence: { bankLineId: "b1", ledgerKey: "k1", bankAmount: 45_000, ledgerAmount: 45_000, fee: 25 }, status: "proposed", proposedAt: "2026-11-03T10:00:00Z", resolvedBy: null, resolvedAt: null, note: null };
+    let refused = false;
+    const calls = mockApi({
+      "GET /api/recon": { body: view({ report: { items: [], totals: [] }, adjustments: [adj] }) },
+      "POST /api/recon/adjustments/adj_1/approve": () => {
+        if (refused) return { body: { ...adj, status: "approved" } };
+        refused = true;
+        return { status: 409, body: { error: "this adjustment no longer applies to the current books" } };
+      },
+    });
+    const user = userEvent.setup();
+    await renderRecon();
+    await screen.findByText("PayPal fee $0.25");
+    await user.type(screen.getByPlaceholderText("you@company.example"), "cfo@company.example");
+    await user.type(screen.getByPlaceholderText(/checked against the PayPal statement/), "usual fee");
+    await user.click(screen.getByRole("button", { name: "Approve $0.25" }));
+    await screen.findByText(/no longer applies to the current books/);
+    await user.click(screen.getByRole("button", { name: "Approve $0.25" }));
+    await screen.findByText("Adjustment approved.");
+    expect(calls.filter((c) => c.path.endsWith("/approve")).at(-1)!.body).toEqual({ approver: "cfo@company.example", note: "usual fee" });
+  });
+
+  test("importing validates JSON before sending, then sends the lines as the named person", async () => {
+    const calls = mockApi({ "GET /api/recon": { body: view({ report: { items: [], totals: [] }, bank: [], ledger: [] }) }, "POST /api/recon/bank-lines": { body: { added: 1, unchanged: 0 } } });
+    const user = userEvent.setup();
+    await renderRecon();
+    await user.type(await screen.findByPlaceholderText("you@company.example"), "ops@co");
+    await user.click(screen.getByRole("button", { name: "Import settlement lines" }));
+    const box = screen.getByRole("textbox", { name: /Settlement lines/ });
+    await user.click(box);
+    await user.paste("not json");
+    await user.click(screen.getByRole("button", { name: "Import" }));
+    await screen.findByText(/not valid JSON/);
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await user.clear(box);
+    await user.click(box);
+    await user.paste('[{"id":"b1","amount":100,"currency":"USD","date":"2026-11-03T00:00:00Z"}]');
+    await user.click(screen.getByRole("button", { name: "Import" }));
+    await screen.findByText(/Imported 1 new line/);
+    // One notice, not a second generic one on top.
+    expect(screen.getAllByRole("listitem").filter((li) => /import/i.test(li.textContent ?? ""))).toHaveLength(1);
+    expect(screen.queryByText("Settlement lines imported.")).toBeNull();
+    expect(calls.find((c) => c.path === "/api/recon/bank-lines")!.body).toEqual({ lines: [{ id: "b1", amount: 100, currency: "USD", date: "2026-11-03T00:00:00Z" }], importedBy: "ops@co" });
+  });
+
+  test("a note written on one adjustment is never sent with another", async () => {
+    const adj = (id: string, amount: number) => ({ id, itemId: `rc_${id}`, kind: "fee", amount, currency: "USD", evidence: { bankLineId: `b_${id}`, ledgerKey: `k_${id}`, bankAmount: 45_000, ledgerAmount: 45_000, fee: amount }, status: "proposed", proposedAt: "2026-11-03T10:00:00Z", resolvedBy: null, resolvedAt: null, note: null });
+    const calls = mockApi({
+      "GET /api/recon": { body: view({ report: { items: [], totals: [] }, adjustments: [adj("a1", 25), adj("a2", 50)] }) },
+      "POST /api/recon/adjustments/a1/approve": { body: { ...adj("a1", 25), status: "approved" } },
+      "POST /api/recon/adjustments/a2/approve": { body: { ...adj("a2", 50), status: "approved" } },
+    });
+    const user = userEvent.setup();
+    await renderRecon();
+    await screen.findByText("PayPal fee $0.25");
+    await user.type(screen.getByPlaceholderText("you@company.example"), "cfo@co");
+    const notes = screen.getAllByPlaceholderText(/checked against the PayPal statement/);
+    expect(notes).toHaveLength(2);
+    await user.type(notes[0]!, "note for the $0.25 fee only");
+    await user.click(screen.getByRole("button", { name: "Approve $0.50" }));
+    await screen.findByText("Adjustment approved.");
+    expect(calls.find((c) => c.path === "/api/recon/adjustments/a2/approve")!.body).toEqual({ approver: "cfo@co" });
+  });
+
+  test("the confirmable reasons in the screen are the ones the server enforces", async () => {
+    const { CONFIRMABLE } = await import("./screens/Recon");
+    const { CONFIRMABLE_REASONS } = await import("@pfw/recon");
+    expect([...CONFIRMABLE].sort()).toEqual([...CONFIRMABLE_REASONS].sort());
+  });
+
+  test("a rejected adjustment can be reopened by a named person; an approved one cannot", async () => {
+    const adj = (id: string, status: string) => ({ id, itemId: `rc_${id}`, kind: "difference", amount: -10, currency: "USD", evidence: { bankLineId: `b_${id}`, ledgerKey: `k_${id}`, bankAmount: 4490, ledgerAmount: 4500, fee: 0 }, status, proposedAt: "2026-11-03T10:00:00Z", resolvedBy: "cfo@co", resolvedAt: "2026-11-03T11:00:00Z", note: null });
+    const calls = mockApi({
+      "GET /api/recon": { body: view({ report: { items: [], totals: [] }, adjustments: [adj("r1", "rejected"), adj("a1", "approved")] }) },
+      "POST /api/recon/adjustments/r1/reopen": { body: { ...adj("r1~1", "proposed"), resolvedBy: null, resolvedAt: null } },
+    });
+    const user = userEvent.setup();
+    await renderRecon();
+    await screen.findByRole("button", { name: /Reopen the rejected/ });
+    expect(screen.getAllByRole("button", { name: /Reopen/ })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: /Reopen the rejected/ }));
+    await screen.findByText(/Enter your name so this is attributed to you/);
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await user.type(screen.getByPlaceholderText("you@company.example"), "cfo@company.example");
+    await user.click(screen.getByRole("button", { name: /Reopen the rejected/ }));
+    await screen.findByText(/Adjustment reopened/);
+    expect(calls.find((c) => c.path === "/api/recon/adjustments/r1/reopen")!.body).toEqual({ reopenedBy: "cfo@company.example" });
+  });
+
+  test("a line that does not say who was paid can be confirmed by a person", async () => {
+    mockApi({
+      "GET /api/recon": {
+        body: view({
+          report: { items: [item({ reason: "receiver_unverified", ledgerKey: "k1", candidates: ["k1"], explanation: "The bank line does not say who was paid, so the payee could not be checked against the authorized account." })], totals: [] },
+        }),
+      },
+    });
+    await renderRecon();
+    await screen.findByText("Line does not say who was paid");
+    expect(screen.getByRole("button", { name: /^This is it: the payment to Acme Supplies/ })).toBeTruthy();
+  });
+
+  test("with nothing imported it says what to do", async () => {
+    mockApi({ "GET /api/recon": { body: view({ report: { items: [], totals: [] }, bank: [], ledger: [] }) } });
+    await renderRecon();
+    await screen.findByText(/Import PayPal's settlement lines, then run reconciliation/);
+  });
+});
+
 describe("how a sent payment is described", () => {
   const sent = (providerStatus: string | null) => outcome({ verdict: "allow", execution: "executed", providerStatus, approval: null });
   test("only a confirmed payout says paid, and a payout PayPal is still processing says so", () => {

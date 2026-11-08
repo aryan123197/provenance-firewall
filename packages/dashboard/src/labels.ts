@@ -83,3 +83,22 @@ export function outcome(d: { verdict: string; execution: string | null; provider
   if (d.verdict === "deny") return "Blocked · nothing sent";
   return "Allowed";
 }
+
+/** Why the reconciler could not settle a bank line by itself, in the words an operator needs. */
+export const RECON_REASON: Record<string, string> = {
+  single_reference_match: "Matched by reference",
+  single_candidate: "Matched by amount, receiver and date",
+  operator_confirmed: "Confirmed by a person",
+  reference_unknown: "Reference we do not recognise",
+  no_candidate: "No payment fits",
+  several_candidates: "More than one payment fits",
+  competing_bank_lines: "More than one line claims a payment",
+  amount_difference: "Amount differs from what was authorized",
+  currency_mismatch: "Currency differs",
+  receiver_mismatch: "Paid to a different account",
+  receiver_unverified: "Line does not say who was paid",
+  not_settled: "Not settled yet",
+  invoice_ambiguous: "More than one purchase order fits",
+  invoice_mismatch: "Purchase order does not match",
+};
+export const reconReason = (r: string) => RECON_REASON[r] ?? r;

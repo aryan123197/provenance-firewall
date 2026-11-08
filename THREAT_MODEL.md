@@ -47,6 +47,23 @@ The engine's safety claims are also checked as properties over tens of thousands
 
 `pnpm harness` runs 26 scenarios against an unprotected baseline and the firewall ([reports/scorecard.md](reports/scorecard.md)). The agent in that run is a deterministic stand-in that obeys instructions found in documents, and payments go to an in-process fake of PayPal Payouts. The result measures the firewall, not any real model, and not live PayPal. A separate run with a real model (`claude-sonnet-5-5`, reports/scorecard-llm.md) found it resists injected instructions by itself but pays inflated, duplicate and out-of-policy invoices, which the firewall stops.
 
+## Close and reconciliation
+
+Settlement lines are a second place untrusted text enters: a memo, a reference or a receiver can be forged by whoever can influence what PayPal reports.
+
+| Attack | Mitigation |
+| --- | --- |
+| A memo tells the matcher which payment it settles, or that a difference is pre-approved | The memo is never read by the matcher; it is stored and shown to a person only. Tested with arbitrary memo strings (the result must not change). |
+| A forged or unknown reference to look like one of our payments | A line with a reference we do not recognise is `unmatched`; it does not fall back to amount matching. |
+| A payout we did not authorize with the same amount as one we did | Same: `unmatched`, and the real payment stays "not settled" rather than being credited. |
+| Money settled to a different account, or in a different currency, with an otherwise perfect match | `ambiguous`; no adjustment is proposed; a person cannot confirm it through the match endpoint either. |
+| A line with a perfect reference and amount but no receiver, so the payee is never checked | Never matched on its own: `ambiguous` (`receiver_unverified`) until a person confirms it. |
+| The same payout reported twice | Both lines are `ambiguous` (two lines claim one payment); neither matches. |
+| A small "rounding" difference used to hide a larger one | Differences are never absorbed by the matcher. Only a person can approve an adjustment, one at a time, up to a fixed ceiling, re-checked at approval time. |
+| Editing or deleting a settlement line after the fact | Lines are append-only in the database; re-importing a known id with different content is refused. Imports, runs, confirmations and adjustments are signed audit entries. |
+
+Not covered: the real shape of PayPal's settlement report (see the README status table), refunds, returns and chargebacks (these have negative or reversing amounts, which the importer rejects today, so they must be handled outside this tool), multi-currency conversion, and an operator who confirms a wrong match on purpose (it is attributed and audited, not prevented).
+
 ## Known limitations and non-goals
 
 - **Registry compromise.** If an attacker can edit the vendor registry, they can register themselves. Registry edits are operator-token-only, validated, attributed to a named person and written to the signed audit log with before and after values; changing where an existing vendor is paid is flagged in the audit entry and needs an explicit confirmation in the dashboard. That makes a malicious change visible, not impossible: a stolen operator token still edits the registry. Keep the token out of the agent's reach.
