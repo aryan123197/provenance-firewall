@@ -123,7 +123,7 @@ export interface DemoRun {
 }
 
 export type ApprovalResult =
-  | { status: "executed"; receipt: { amount: number; currency: string; receiver: string; reference: string } }
+  | { status: "executed"; receipt: { amount: number; currency: string; receiver: string; reference: string; /** PayPal's own status for it: pending until the money arrives. */ status?: string } }
   | { status: "rejected" | "needs_approval" | "denied" | "execution_failed" | "invalid" }
   | { status: "blocked"; reason: string };
 

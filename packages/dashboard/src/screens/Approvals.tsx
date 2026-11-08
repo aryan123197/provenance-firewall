@@ -140,7 +140,11 @@ function PendingCard({ a, forceOpen, open, onDone, notify }: { a: Approval; forc
       const who = String(a.intent.payee.value);
       if (r.status === "blocked") setMsg({ ok: false, text: `Cannot approve: ${r.reason} An approval cannot override a hard limit.` });
       else {
-        if (r.status === "executed") notify(true, `Approved and paid ${money(r.receipt.amount, r.receipt.currency)} to ${who} (${r.receipt.receiver}).`);
+        if (r.status === "executed") {
+          // PayPal accepting a payout is not the money arriving: only a confirmed one is "paid".
+          const settled = !r.receipt.status || r.receipt.status === "success";
+          notify(true, `Approved and ${settled ? "paid" : "sent"} ${money(r.receipt.amount, r.receipt.currency)} to ${who} (${r.receipt.receiver})${settled ? "" : `; PayPal reports it as ${r.receipt.status}`}.`);
+        }
         else if (r.status === "execution_failed") notify(false, `Approved ${who}, but PayPal did not accept it yet. It will retry safely with the same request id.`);
         else notify(true, approve ? `Approved ${who}.` : `Rejected ${who}. Nothing was sent.`);
         onDone();

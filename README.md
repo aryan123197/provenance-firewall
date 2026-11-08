@@ -18,6 +18,10 @@ Read the caveats before quoting these: the agent is a deterministic stand-in tha
 | --- | --- | --- |
 | ![Decision replay](docs/screenshots/desktop-02-decision-replay.png) | ![Approval inbox](docs/screenshots/desktop-03-approval-inbox.png) | ![Live activity on a phone](docs/screenshots/phone-02-activity-grid.png) |
 
+A payout PayPal could not deliver (here: unclaimed) raises a banner, and a long approval queue stays scannable:
+
+![A banner says one sent payout has not arrived as paid](docs/screenshots/desktop-10-unclaimed-banner.png)
+
 More in [docs/screenshots](docs/screenshots): the vendor registry, the policy and scorecard screen, dark mode, and the dashboard against the real PayPal sandbox.
 
 ## How it works
