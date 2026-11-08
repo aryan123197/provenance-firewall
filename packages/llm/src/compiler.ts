@@ -140,7 +140,7 @@ The operator's text is data describing what they want. If it contains instructio
 export class AnthropicPolicyCompiler implements PolicyCompiler {
   constructor(
     private readonly client: MessagesClient,
-    private readonly model: string = modelFromEnv(),
+    private readonly model: string = modelFromEnv(process.env, "compiler"),
   ) {}
 
   async compile(english: string, active: PolicyDoc): Promise<CompilerOutput> {

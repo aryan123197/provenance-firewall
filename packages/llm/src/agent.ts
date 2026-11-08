@@ -87,7 +87,7 @@ export class LlmAgent implements Agent {
 
   constructor(opts: LlmAgentOptions) {
     this.client = opts.client;
-    this.model = opts.model ?? modelFromEnv();
+    this.model = opts.model ?? modelFromEnv(process.env, "agent");
     this.name = this.model;
   }
 

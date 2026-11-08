@@ -310,7 +310,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
   };
 
   app.post<{ Body: { english?: string } }>("/api/policy/compile", { preHandler: requireOperator }, async (req, reply) => {
-    if (!deps.compiler) return reply.code(503).send({ error: "Plain-English policies need a Claude API key (ANTHROPIC_API_KEY) on the server." });
+    if (!deps.compiler) return reply.code(503).send({ error: "Plain-English policies need an LLM API key (ANTHROPIC_API_KEY, or GEMINI_API_KEY for Google Gemini) on the server." });
     const english = req.body?.english;
     if (typeof english !== "string" || !english.trim()) return reply.code(400).send({ error: "Write the policy you want first." });
     // The same limit the store enforces on activation, checked before a paid model call rather than after it.
