@@ -1,9 +1,11 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, test } from "vitest";
 import { applyPatch, diffPolicy, lintPolicy, loadPolicy, runIntentExamples, runPolicyTests } from "@pfw/core";
 import type { AgentTools, PayArgs, PayResult } from "@pfw/harness";
-import { AGENT_TOOLS, AnthropicPolicyCompiler, LlmAgent, LlmBudgetError, LlmRefusalError, toCompilerOutput, withDailyBudget, type MessagesClient } from "./index";
+import { AGENT_TOOLS, AnthropicPolicyCompiler, LlmAgent, LlmBudgetError, LlmRefusalError, createClient, hasLoginProfile, toCompilerOutput, withDailyBudget, type MessagesClient } from "./index";
 
 const base = loadPolicy(readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8"));
 
@@ -67,7 +69,7 @@ describe("LlmAgent", () => {
     const { client, requests } = fakeClient([{ content: [text("nothing to do")] }]);
     await new LlmAgent({ client }).run([{ type: "document", id: "inv_1" }], tools().t);
     const req = requests[0]! as unknown as Record<string, unknown>;
-    expect(req.model).toBe("claude-opus-5-5");
+    expect(req.model).toBe("claude-sonnet-5-5");
     expect(AGENT_TOOLS.map((x) => x.name)).toEqual(["read_document", "find_vendor", "pay"]);
     for (const banned of ["tool_choice", "temperature", "top_p", "top_k", "thinking"]) expect(req[banned]).toBeUndefined();
     expect(JSON.stringify(req.messages)).toContain("inv_1");
@@ -167,7 +169,7 @@ describe("AnthropicPolicyCompiler", () => {
     const { client, requests } = fakeClient([reply(specOutput)]);
     await new AnthropicPolicyCompiler(client).compile("anything over $2k needs my approval", base);
     const req = requests[0]! as unknown as Record<string, unknown> & { output_config: { format: { type: string; schema: { required: string[] } } }; messages: { content: string }[] };
-    expect(req.model).toBe("claude-opus-5-5");
+    expect(req.model).toBe("claude-sonnet-5-5");
     expect(req.output_config.format.type).toBe("json_schema");
     expect(req.output_config.format.schema.required).toContain("unsupported");
     expect(req.messages[0]!.content).toContain('"approvalThreshold": 50000');
@@ -235,5 +237,32 @@ describe("withDailyBudget", () => {
     const c = withDailyBudget(fakeClient([{ stop_reason: "tool_use", content: [toolUse("t1", "find_vendor", { name: "x" })] }]).client, 1);
     await expect(new LlmAgent({ client: c }).run([], tools().t)).rejects.toBeInstanceOf(LlmBudgetError);
     await expect(new AnthropicPolicyCompiler(withDailyBudget(ok(), 0)).compile("x", base)).rejects.toBeInstanceOf(LlmBudgetError);
+  });
+});
+
+describe("credentials", () => {
+  const home = (withProfile: boolean) => {
+    const dir = mkdtempSync(join(tmpdir(), "pfw-home-"));
+    if (withProfile) {
+      mkdirSync(join(dir, ".config", "anthropic", "credentials"), { recursive: true });
+      writeFileSync(join(dir, ".config", "anthropic", "credentials", "default.json"), "{}");
+    }
+    return dir;
+  };
+  test("no key and no login profile means no client, so the features say what is missing", () => {
+    expect(createClient({ HOME: home(false) })).toBeUndefined();
+    expect(hasLoginProfile({ HOME: home(false) })).toBe(false);
+  });
+  test("an `ant auth login` profile is enough: the SDK authenticates by itself", () => {
+    expect(hasLoginProfile({ HOME: home(true) })).toBe(true);
+    expect(createClient({ HOME: home(true) })).toBeDefined();
+  });
+  test("ANTHROPIC_CONFIG_DIR moves where the profile is looked for", () => {
+    const dir = home(true);
+    expect(hasLoginProfile({ HOME: home(false), ANTHROPIC_CONFIG_DIR: join(dir, ".config", "anthropic") })).toBe(true);
+  });
+  test("an API key or auth token still works with no profile", () => {
+    expect(createClient({ HOME: home(false), ANTHROPIC_API_KEY: "sk-test" })).toBeDefined();
+    expect(createClient({ HOME: home(false), ANTHROPIC_AUTH_TOKEN: "tok" })).toBeDefined();
   });
 });

@@ -20,6 +20,16 @@ const seed = (invoices: PayPalInvoices) =>
   });
 
 describe("PayPalInvoices", () => {
+  test("an invoice created without an issuer email sends no email_address, and reads back with no remit-to (as the live sandbox does)", async () => {
+    const { fake, invoices } = setup();
+    const id = await invoices.createDraft({ businessName: "Acme Supplies", recipientEmail: "buyer@sandbox.example", items: [{ name: "Toner", amount: 45_000 }], note: "hello" });
+    const post = fake.calls.find((c) => c.method === "POST" && c.path === "/v2/invoicing/invoices")!;
+    expect((post.body as { invoicer: Record<string, unknown> }).invoicer).toEqual({ business_name: "Acme Supplies" });
+    const read = await invoices.get(id);
+    expect(read.remitTo).toBeUndefined();
+    expect(read).toMatchObject({ vendorName: "Acme Supplies", total: 45_000, note: "hello" });
+  });
+
   test("createDraft posts the documented v2 body and returns the id from the returned link", async () => {
     const { fake, invoices } = setup();
     const id = await seed(invoices);

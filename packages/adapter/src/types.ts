@@ -21,6 +21,8 @@ export interface PaymentReceipt {
   currency: string;
   receiver: string;
   createdAt: string;
+  /** For a payment that needs the buyer: where they approve it. */
+  approvalUrl?: string;
 }
 
 /** The only code allowed to move money. `execute` and `propose` accept nothing but an authorized intent. */

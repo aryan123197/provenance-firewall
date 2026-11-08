@@ -91,12 +91,14 @@ describe("headline numbers", () => {
 
   test("the dollar totals quoted next to them match the scorecard", () => {
     const usd = (minor: number) => `$${Math.round(minor / 100).toLocaleString("en-US")}`;
+    const live = existsSync(join(root, "reports/scorecard-llm.json")) ? (JSON.parse(read("reports/scorecard-llm.json")) as { attacks: typeof card.attacks }).attacks : undefined;
+    const allowed = [card.attacks, ...(live ? [live] : [])].flatMap((a) => [usd(a.baselineAmount), usd(a.firewalledAmount)]);
     const text = DOCS.map(read).join("\n");
     expect(text).toContain(usd(card.attacks.baselineAmount));
     expect(text).toContain(usd(card.attacks.firewalledAmount));
-    // Any "$N" total in an attacks row that is not one of the two scorecard totals is stale.
+    // Any "$N" total in an attacks row that is not a total from a committed scorecard (the scripted one or the live-model one) is stale.
     const rows = text.split("\n").filter((l) => /Attacks that moved money/i.test(l));
-    for (const row of rows) for (const m of row.matchAll(/\$\d(?:[\d,]*\d)?/g)) expect([usd(card.attacks.baselineAmount), usd(card.attacks.firewalledAmount)]).toContain(m[0]);
+    for (const row of rows) for (const m of row.matchAll(/\$\d(?:[\d,]*\d)?/g)) expect(allowed).toContain(m[0]);
   });
 });
 

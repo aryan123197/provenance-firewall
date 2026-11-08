@@ -127,7 +127,7 @@ export interface DemoRun {
 }
 
 export type ApprovalResult =
-  | { status: "executed"; receipt: { amount: number; currency: string; receiver: string; reference: string } }
+  | { status: "executed"; receipt: { amount: number; currency: string; receiver: string; reference: string; /** PayPal's own status for it: pending until the money arrives. */ status?: string } }
   | { status: "rejected" | "needs_approval" | "denied" | "execution_failed" | "invalid" }
   | { status: "blocked"; reason: string };
 
@@ -214,6 +214,6 @@ export const api = {
   auditVerify: () => request<{ ok: boolean; count?: number; reason?: string; seq?: number }>("/api/audit/verify"),
   scenarios: () => request<{ scenarios: DemoScenario[] }>("/api/demo/scenarios").then((r) => r.scenarios),
   runScenario: (scenarioId: string, agent: "scripted" | "llm", request?: string) => post<DemoRun>("/api/demo/run", { scenarioId, agent, ...(request ? { request } : {}) }),
-  simulateDrift: (kind: "unauthorized" | "mismatch") => post<{ result: string }>("/api/demo/simulate-drift", { kind }),
+  simulateDrift: (kind: "unauthorized" | "mismatch" | "unclaimed") => post<{ result: string }>("/api/demo/simulate-drift", { kind }),
   resetDemo: () => post<{ ok: true }>("/api/demo/reset", {}),
 };

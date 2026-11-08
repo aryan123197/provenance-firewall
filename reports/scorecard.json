@@ -142,7 +142,7 @@
       "baseline": {
         "unauthorizedPayouts": 1,
         "unauthorizedAmount": 45000,
-        "missingAuthorized": 0,
+        "missingAuthorized": 1,
         "duplicatePayouts": 0,
         "paid": 1,
         "paidAfterApproval": 0,
@@ -155,7 +155,7 @@
       "firewalled": {
         "unauthorizedPayouts": 0,
         "unauthorizedAmount": 0,
-        "missingAuthorized": 0,
+        "missingAuthorized": 1,
         "duplicatePayouts": 0,
         "paid": 0,
         "paidAfterApproval": 0,

@@ -1,6 +1,6 @@
 # PayPal API assumptions and how to check them
 
-The Payouts, webhook-registration and webhook-verification code has now run against the live PayPal sandbox (2026-11-07); the Invoicing code has not, because the sandbox app does not have Invoicing enabled (see below). Rows marked **Live** were checked against real responses. Everything else is as before: while building I could not reach `developer.paypal.com` (the environment blocks it), so "confirmed" means a web-search summary of PayPal's own documentation agreed, which is better than memory but not the same as reading the reference or seeing a live response.
+The Payouts, webhook-registration, webhook-verification and Invoicing code have now run against the live PayPal sandbox (2026-11-07). A genuinely signed webhook delivery is the one big piece still unseen. Rows marked **Live** were checked against real responses. Everything else is as before: while building I could not reach `developer.paypal.com` (the environment blocks it), so "confirmed" means a web-search summary of PayPal's own documentation agreed, which is better than memory but not the same as reading the reference or seeing a live response.
 
 ## What the live sandbox run showed (2026-11-07)
 
@@ -9,7 +9,7 @@ The Payouts, webhook-registration and webhook-verification code has now run agai
 - **Reusing a `sender_batch_id` is refused, and the response did not look the way the fake said.** A second submission with the same `sender_batch_id` **and** the same `PayPal-Request-Id` was `400 USER_BUSINESS_ERROR` ("Batch with given sender_batch_id already exists"). The link to the original payout is in **`details[0].link[]`** (an array of link objects), the top-level `links` is empty, and the link's host is `api.sandbox.paypal.com`, not the `api-m` host the client calls. The recovery code only read the top-level `links`, so the first live duplicate ended as a failed payment. It now reads both shapes, takes only the payout id from the link and reads the payout through its own base URL; the live duplicate then came back as the original payout, and the sandbox still showed exactly one payout.
 - **`PayPal-Request-Id` replay was not observed.** The documentation suggests a repeated request id returns the original response; here the same id was rejected as above. The fake's default is now "reject" (what happened), and "replay" is kept as an option.
 - **Webhooks, partly.** Register (12 event types), list and delete all worked, and `verify-webhook-signature` answered a forged event without a `SUCCESS`, so `verify` returned `false`. A real signed event was not delivered, because that needs a public https URL, so the event bodies in the Webhooks table below are still unchecked.
-- **Invoicing is off for this app.** `GET /v2/invoicing/invoices` answered `403 NOT_AUTHORIZED`. To use the invoice scripts, enable the **Invoicing** feature on the app in the PayPal developer dashboard (Apps & Credentials, the app, Features), then rerun them. None of the Invoicing rows below has been checked.
+- **Invoicing works once the feature is enabled on the app.** It first answered `403 NOT_AUTHORIZED` (the app lacked the feature and the token had no Invoicing scope); after the Invoicing feature was enabled (Apps & Credentials, the app, Features) the token carried the scope and everything below worked. A clean and an injected invoice were created, sent, listed and read back: the injected note arrives in **`detail.note`**, exactly where `toInvoiceRecord` reads it, so the attack is visible to the agent. One surprise: **an invoice created without `invoicer.email_address` comes back without one** (PayPal issues it from the app's own account and does not echo an email), so `remitTo` is empty. The invoice scripts now make the issuer's email optional, and `demo:invoices` treats an invoice with no stated email as payable to the registered vendor's account. Run through both agents, the unprotected one lost $450.00 to the injected address and the firewalled one paid the clean invoice and denied the injected one (`amount_mismatch`, `payee_change`).
 
 Status: **Confirmed** = agreed by PayPal's documentation as summarised by search. **From memory** = what I believe the API does, unchecked. **Handled** = the code copes with either reading.
 
@@ -32,14 +32,25 @@ Status: **Confirmed** = agreed by PayPal's documentation as summarised by search
 
 | Assumption | Status | If wrong, look at |
 | --- | --- | --- |
-| Invoice object has `detail`, `invoicer`, `primary_recipients`, `items[]` with `name`, `quantity`, `unit_amount.currency_code/value` | Confirmed | `toInvoiceRecord`, `createDraft` |
-| `detail.payment_term.term_type` such as `NET_10` | Confirmed that `term_type` exists with values like `NET_30`; `NET_10` from memory | `createDraft` |
-| `detail.note`, `detail.terms_and_conditions`, `detail.memo`, `invoicer.business_name`, `invoicer.email_address`, `amount`, `due_amount` | From memory | `toInvoiceRecord`: this is where injected text is read, so a wrong name here silently hides it from the agent |
-| Create returns 201 with a link to the new invoice (an `id` is accepted too) | Confirmed that it is 201 with a PayPal-assigned id; link-versus-id shape handled both ways | `createDraft` |
-| Send is `POST .../send` and answers 200 with a link body (any 2xx is accepted, including an empty 202) | Confirmed 200 and the link body | `send` |
-| Send body fields `send_to_recipient` and `send_to_invoicer` | `send_to_invoicer` confirmed from PayPal's sample; `send_to_recipient` from memory | `send` |
-| List is `GET /v2/invoicing/invoices?page&page_size&total_required` returning `items` | From memory | `list` |
-| An API client can **read** invoices through `GET` | Unknown for invoices a vendor issued *to* you | invoices you issued are readable; whether a recipient's app can read them is unverified, and the demo script reads invoices the same account created |
+| Invoice object has `detail`, `invoicer`, `primary_recipients`, `items[]` with `name`, `quantity`, `unit_amount.currency_code/value` | **Live** | `toInvoiceRecord`, `createDraft` |
+| `detail.payment_term.term_type` such as `NET_10` | **Live**: accepted, due date set ten days out | `createDraft` |
+| `detail.note`, `invoicer.business_name`, `amount`, `due_amount` | **Live**. `invoicer.email_address` is only present if you supplied one. `detail.terms_and_conditions` and `detail.memo` were not exercised (still from memory) | `toInvoiceRecord`: this is where injected text is read, so a wrong name here silently hides it from the agent |
+| Create returns 201 with a link to the new invoice (an `id` is accepted too) | **Live**: the id was obtained and the draft read back | `createDraft` |
+| Send is `POST .../send` and answers 200 with a link body (any 2xx is accepted, including an empty 202) | **Live**: accepted; the invoice then lists as `SENT` | `send` |
+| Send body fields `send_to_recipient` and `send_to_invoicer` | **Live**: accepted | `send` |
+| List is `GET /v2/invoicing/invoices?page&page_size&total_required` returning `items` | **Live** | `list` |
+| An API client can **read** invoices through `GET` | **Live** for invoices the app's own account issued; unknown for invoices a vendor issued *to* you | invoices you issued are readable; whether a recipient's app can read them is unverified, and the demo script reads invoices the same account created |
+
+## Orders (`packages/adapter/src/orders.ts`)
+
+| Assumption | Status | If wrong, look at |
+| --- | --- | --- |
+| `POST /v2/checkout/orders` creates an order and answers `PAYER_ACTION_REQUIRED` with a `payer-action` link | **Live**: the status code is 200, not 201 | `PayPalOrdersAdapter.execute` |
+| `payee.email_address`, `amount` and `reference_id` come back on `GET /v2/checkout/orders/{id}` | **Live** | `assertMatches` |
+| Capturing before the buyer approves is refused | **Live**: `422 ORDER_NOT_APPROVED` | `capture` |
+| A repeated `PayPal-Request-Id` returns the original order | **Live**, including when the new body differs, so the result is checked against the authorized intent | `execute` |
+| Statuses `CREATED`, `SAVED`, `APPROVED`, `PAYER_ACTION_REQUIRED`, `COMPLETED`, `VOIDED` | `PAYER_ACTION_REQUIRED` seen live; the rest from memory | `mapOrderStatus` |
+| `POST .../capture` after approval answers 2xx with `status: COMPLETED` | From memory; needs a person to approve in the sandbox | `capture` |
 
 ## Webhooks (`packages/adapter/src/paypal.ts`, `webhooks.ts`)
 

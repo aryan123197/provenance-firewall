@@ -26,8 +26,8 @@ export interface InvoiceRecord {
 
 export interface NewInvoice {
   businessName: string;
-  /** The issuer's email. */
-  email: string;
+  /** The issuer's email. Optional: PayPal then uses the account's own (seen live). */
+  email?: string;
   recipientEmail: string;
   invoiceNumber?: string;
   currency?: string;
@@ -103,7 +103,7 @@ export class PayPalInvoices {
         ...(spec.terms ? { terms_and_conditions: spec.terms } : {}),
         payment_term: { term_type: "NET_10" },
       },
-      invoicer: { business_name: spec.businessName, email_address: spec.email },
+      invoicer: { business_name: spec.businessName, ...(spec.email ? { email_address: spec.email } : {}) },
       primary_recipients: [{ billing_info: { email_address: spec.recipientEmail } }],
       items: spec.items.map((i) => ({
         name: i.name,

@@ -304,6 +304,15 @@ describe("approval inbox", () => {
     expect(screen.getAllByRole("button", { name: /^Review: pay/ })).toHaveLength(3);
   });
 
+  test("approving a payout PayPal has only accepted says sent and its status, not paid", async () => {
+    inbox({ body: { status: "executed", receipt: { amount: 80_000, currency: "USD", receiver: "beta@sandbox.example", reference: "B1", status: "pending" } } });
+    render(<Approvals open={() => {}} onChange={() => {}} />);
+    await userEvent.type(await screen.findByPlaceholderText("you@company.example"), "ana@co.example");
+    await userEvent.click(screen.getByRole("button", { name: /Approve and pay/ }));
+    await screen.findByText(/Approved and sent \$800.00 to Beta Software.*PayPal reports it as pending/);
+    expect(screen.queryByText(/Approved and paid/)).toBeNull();
+  });
+
   test("shows what is being paid, why it was held and where each field came from", async () => {
     inbox({ body: {} });
     render(<Approvals open={() => {}} onChange={() => {}} />);

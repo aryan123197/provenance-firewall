@@ -1,3 +1,6 @@
+import { existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 
 /** The slice of the SDK these modules use, so tests can pass a fake. */
@@ -5,16 +8,29 @@ export interface MessagesClient {
   messages: { create(params: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> };
 }
 
-/** The model both features default to. Override with PFW_MODEL. */
-export const DEFAULT_MODEL = "claude-opus-5-5";
+/** The model both features default to (the one the live results in reports/scorecard-llm.md were measured with). Override with PFW_MODEL. */
+export const DEFAULT_MODEL = "claude-sonnet-5-5";
 export const modelFromEnv = (env: NodeJS.ProcessEnv = process.env) => env.PFW_MODEL ?? DEFAULT_MODEL;
 
 /**
- * Credentials come from the environment (ANTHROPIC_API_KEY, or an `ant auth login` profile); nothing is read from or
- * written to the repository. Returns undefined when no API key is set, so callers can say what is missing.
+ * Whether an `ant auth login` profile exists: the SDK then authenticates by itself with no key in the environment. Only the presence of
+ * the credentials file is checked; the token is never read here.
+ */
+export function hasLoginProfile(env: NodeJS.ProcessEnv = process.env): boolean {
+  const dir = join(env.ANTHROPIC_CONFIG_DIR ?? join(env.HOME ?? homedir(), ".config", "anthropic"), "credentials");
+  try {
+    return existsSync(dir) && readdirSync(dir).some((f) => f.endsWith(".json"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Credentials come from the environment (ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN) or from an `ant auth login` profile on this
+ * machine; nothing is read from or written to the repository. Returns undefined when neither exists, so callers can say what is missing.
  */
 export function createClient(env: NodeJS.ProcessEnv = process.env): MessagesClient | undefined {
-  if (!env.ANTHROPIC_API_KEY && !env.ANTHROPIC_AUTH_TOKEN) return undefined;
+  if (!env.ANTHROPIC_API_KEY && !env.ANTHROPIC_AUTH_TOKEN && !hasLoginProfile(env)) return undefined;
   return new Anthropic();
 }
 

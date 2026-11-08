@@ -17,6 +17,14 @@ export function invoiceDocFromPayPal(r: InvoiceRecord): InvoiceDoc {
   };
 }
 
+/**
+ * A real sandbox invoice does not state the issuer's email (seen live): payment goes to the issuer implicitly. Where an invoice has no
+ * remit-to, treat it as asking for `account` (the registered vendor's own); an invoice that does state one keeps it.
+ */
+export function withVendorAccount(records: InvoiceRecord[], account: string): InvoiceRecord[] {
+  return records.map((r) => (r.remitTo ? r : { ...r, remitTo: account }));
+}
+
 export interface LiveInvoiceOptions {
   /** The operator's registry. PayPal invoices never add to it. */
   vendors: VendorRecord[];

@@ -35,6 +35,11 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
   const invoices = new Map<string, Record<string, unknown> & { status: string }>();
   let invoiceSeq = 0;
   const batches = new Map<string, { status: string; item: string; senderBatchId: string }>();
+  // Orders v2, as the sandbox behaved: create answers 200 PAYER_ACTION_REQUIRED with a payer-action link; a repeated PayPal-Request-Id
+  // returns the ORIGINAL order even if the body differs; capturing an order the buyer has not approved is a 422 ORDER_NOT_APPROVED.
+  const orders = new Map<string, { id: string; status: string; amount: string; currency: string; payee: string; captured: boolean }>();
+  const ordersByRequestId = new Map<string, string>();
+  let orderSeq = 0;
   let validToken = "tok-1";
   let tokenSeq = 1;
   let batchSeq = 0;
@@ -104,6 +109,39 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
       const b = body as { transmission_sig?: string; webhook_id?: string };
       return json(200, { verification_status: b.transmission_sig === "valid-sig" && b.webhook_id === "WH-TEST" ? "SUCCESS" : "FAILURE" });
     }
+    if (url.pathname.startsWith("/v2/checkout/orders")) {
+      const orderJson = (o: { id: string; status: string; amount: string; currency: string; payee: string }) => ({
+        id: o.id,
+        intent: "CAPTURE",
+        status: o.status,
+        purchase_units: [{ reference_id: "pfw", amount: { currency_code: o.currency, value: o.amount }, payee: { email_address: o.payee } }],
+        links: [
+          { href: `${url.origin}/v2/checkout/orders/${o.id}`, rel: "self", method: "GET" },
+          { href: `https://www.sandbox.paypal.com/checkoutnow?token=${o.id}`, rel: "payer-action", method: "GET" },
+        ],
+      });
+      if (init.method === "POST" && url.pathname === "/v2/checkout/orders") {
+        const rid = headers["PayPal-Request-Id"];
+        const prior = rid ? ordersByRequestId.get(rid) : undefined;
+        if (loseResponse) throw new Error("socket hang up");
+        if (prior) return json(200, { id: prior, status: orders.get(prior)!.status, links: orderJson(orders.get(prior)!).links });
+        const u = (body as { purchase_units: { amount: { currency_code: string; value: string }; payee: { email_address: string } }[] }).purchase_units[0]!;
+        const id = `FAKEORDER${String(++orderSeq).padStart(4, "0")}`;
+        orders.set(id, { id, status: "PAYER_ACTION_REQUIRED", amount: u.amount.value, currency: u.amount.currency_code, payee: u.payee.email_address, captured: false });
+        if (rid) ordersByRequestId.set(rid, id);
+        return json(200, { id, status: "PAYER_ACTION_REQUIRED", links: orderJson(orders.get(id)!).links });
+      }
+      const m = /^\/v2\/checkout\/orders\/([^/]+)(\/capture)?$/.exec(url.pathname);
+      const o = m ? orders.get(m[1]!) : undefined;
+      if (!o) return json(404, { name: "RESOURCE_NOT_FOUND" });
+      if (init.method === "GET" && !m![2]) return json(200, orderJson(o));
+      if (init.method === "POST" && m![2]) {
+        if (o.status !== "APPROVED") return json(422, { name: "UNPROCESSABLE_ENTITY", details: [{ issue: "ORDER_NOT_APPROVED" }] });
+        o.status = "COMPLETED";
+        o.captured = true;
+        return json(201, orderJson(o));
+      }
+    }
     if (init.method === "POST" && url.pathname === "/v1/payments/payouts") {
       const rid = headers["PayPal-Request-Id"];
       const sbi = (body as { sender_batch_header?: { sender_batch_id?: string } }).sender_batch_header?.sender_batch_id;
@@ -155,6 +193,13 @@ export function createFakePayPal(opts: { clientId?: string; clientSecret?: strin
     invoices,
     /** Payouts that actually exist on the fake PayPal, whether or not the caller saw the response. */
     payouts,
+    /** Orders held by the fake Orders API. */
+    orders,
+    /** The buyer approving an order on PayPal's page. Only the buyer can do this; the API has no call for it. */
+    approveOrder: (id: string) => {
+      const o = orders.get(id);
+      if (o) o.status = "APPROVED";
+    },
     /** Queue a failure for the next non-token request. */
     failNext: (f: Fault) => faults.push(f),
     expireToken: () => {

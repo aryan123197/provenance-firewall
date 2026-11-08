@@ -5,4 +5,5 @@ export * from "./paypal";
 export * from "./webhook";
 export * from "./paypal-http";
 export * from "./invoices";
+export * from "./orders";
 export * from "./webhooks";

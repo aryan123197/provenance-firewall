@@ -13,7 +13,7 @@ import { LlmAgent, createClient, modelFromEnv } from "@pfw/llm";
 
 const client = createClient();
 if (!client) {
-  console.error("No Claude credentials found. Set ANTHROPIC_API_KEY (or run `ant auth login`) and try again.");
+  console.error("No Claude credentials found. Set ANTHROPIC_API_KEY (or run `ant auth login`; see README) and try again.");
   process.exit(2);
 }
 
