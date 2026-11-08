@@ -20,6 +20,7 @@
     "dev:demo": "DEMO_MODE=1 OPEN_OPERATOR=1 DATABASE_PATH=:memory: tsx packages/server/src/main.ts",
     "build": "pnpm --filter @pfw/dashboard build",
     "gen:audit-key": "tsx scripts/gen-audit-key.ts",
+    "harness:recon": "tsx scripts/harness-recon.ts",
     "harness:llm": "tsx scripts/harness-llm.ts",
     "seed:invoices": "tsx scripts/seed-invoices.ts",
     "demo:invoices": "tsx scripts/demo-invoices.ts",
@@ -51,6 +52,7 @@
     "@pfw/firewall": "workspace:*",
     "@pfw/harness": "workspace:*",
     "@pfw/llm": "workspace:*",
+    "@pfw/recon": "workspace:*",
     "@pfw/server": "workspace:*",
     "@pfw/store": "workspace:*",
     "tsx": "^4.23.15"

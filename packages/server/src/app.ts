@@ -17,6 +17,7 @@ import {
 } from "@pfw/core";
 import type { Firewall } from "@pfw/firewall";
 import { ApprovalStateError, PolicyConflictError, RegistryError, type Store } from "@pfw/store";
+import { ReconInputError, ReconStateError, ReconStore } from "@pfw/recon";
 import { LlmBudgetError, LlmRefusalError, type PolicyCompiler } from "@pfw/llm";
 import { z } from "zod";
 
@@ -102,6 +103,17 @@ export function createApp(deps: AppDeps): FastifyInstance {
     }
   };
 
+  // Bank lines that still need a person, plus adjustments waiting for approval. Reconciliation is not on the payment path,
+  // so if it cannot be computed the status still answers, with null.
+  const reconOpen = (): number | null => {
+    try {
+      const recon = reconOf();
+      return recon.report().items.filter((i) => i.bankLineId !== null && i.status !== "matched").length + recon.adjustments("proposed").length;
+    } catch {
+      return null;
+    }
+  };
+
   // At most one provider poll per minute, started by a status request and never waited on.
   let lastPoll = 0;
   app.get("/api/status", async () => {
@@ -123,6 +135,7 @@ export function createApp(deps: AppDeps): FastifyInstance {
       driftOpen: store.listDrift("open").length,
       payoutsNeedingAttention: store.countPayoutsNeedingAttention(),
       pendingApprovals: store.listApprovals("pending").length,
+      reconOpen: reconOpen(),
     };
   });
 
@@ -188,6 +201,68 @@ export function createApp(deps: AppDeps): FastifyInstance {
     } catch (e) {
       if (e instanceof RegistryError) return reply.code(400).send({ error: e.message });
       throw e;
+    }
+  });
+
+  // ---- Close and reconciliation: PayPal's settlement lines against the ledger and purchase orders ----
+  // A new database (a demo reset) gets a new ReconStore, so the cache is keyed by the store itself.
+  const recons = new WeakMap<Store, ReconStore>();
+  const reconOf = () => {
+    const { store } = deps.runtime();
+    const existing = recons.get(store);
+    if (existing) return existing;
+    const created = new ReconStore(store);
+    recons.set(store, created);
+    return created;
+  };
+  const reconErrors = (reply: FastifyReply, e: unknown) => {
+    if (e instanceof ReconInputError) return reply.code(400).send({ error: e.message });
+    if (e instanceof ReconStateError) return reply.code(/unknown/.test(e.message) ? 404 : 409).send({ error: e.message });
+    throw e;
+  };
+  app.get("/api/recon", async () => {
+    const recon = reconOf();
+    return { report: recon.report(), adjustments: recon.adjustments(), config: recon.config, bank: recon.bankLines(), ledger: recon.ledger() };
+  });
+  app.post<{ Body: { importedBy?: string; lines?: unknown } }>("/api/recon/bank-lines", { preHandler: requireOperator }, async (req, reply) => {
+    try {
+      return reconOf().importBankLines(req.body?.lines, String(req.body?.importedBy ?? ""));
+    } catch (e) {
+      return reconErrors(reply, e);
+    }
+  });
+  app.post<{ Body: { runBy?: string } }>("/api/recon/run", { preHandler: requireOperator }, async (req, reply) => {
+    try {
+      return reconOf().run(String(req.body?.runBy ?? ""));
+    } catch (e) {
+      return reconErrors(reply, e);
+    }
+  });
+  app.post<{ Body: { bankLineId?: string; ledgerKey?: string; resolvedBy?: string; note?: string } }>("/api/recon/matches", { preHandler: requireOperator }, async (req, reply) => {
+    const b = req.body ?? {};
+    if (typeof b.bankLineId !== "string" || typeof b.ledgerKey !== "string") return reply.code(400).send({ error: "bankLineId and ledgerKey are required" });
+    try {
+      reconOf().resolveMatch({ bankLineId: b.bankLineId, ledgerKey: b.ledgerKey, resolvedBy: String(b.resolvedBy ?? ""), ...(typeof b.note === "string" ? { note: b.note } : {}) });
+      return { ok: true };
+    } catch (e) {
+      return reconErrors(reply, e);
+    }
+  });
+  const resolveAdjustment = (approve: boolean) =>
+    async (req: FastifyRequest<{ Params: { id: string }; Body: { approver?: string; note?: string } }>, reply: FastifyReply) => {
+      try {
+        return reconOf().resolveAdjustment(req.params.id, { approver: String(req.body?.approver ?? ""), approve, ...(typeof req.body?.note === "string" ? { note: req.body.note } : {}) });
+      } catch (e) {
+        return reconErrors(reply, e);
+      }
+    };
+  app.post<{ Params: { id: string }; Body: { approver?: string; note?: string } }>("/api/recon/adjustments/:id/approve", { preHandler: requireOperator }, resolveAdjustment(true));
+  app.post<{ Params: { id: string }; Body: { approver?: string; note?: string } }>("/api/recon/adjustments/:id/reject", { preHandler: requireOperator }, resolveAdjustment(false));
+  app.post<{ Params: { id: string }; Body: { reopenedBy?: string } }>("/api/recon/adjustments/:id/reopen", { preHandler: requireOperator }, async (req, reply) => {
+    try {
+      return reconOf().reopenAdjustment(req.params.id, { reopenedBy: String(req.body?.reopenedBy ?? "") });
+    } catch (e) {
+      return reconErrors(reply, e);
     }
   });
 

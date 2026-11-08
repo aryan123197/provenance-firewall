@@ -332,3 +332,28 @@ textarea:disabled, input:disabled { opacity: 0.6; }
 
 .drift-demo { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
 .ok-text { color: var(--allow); font-weight: 600; } .bad-text { color: var(--deny); font-weight: 600; }
+
+/* Close and reconciliation */
+.recon-actions { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-top: 14px; }
+.recon-import { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.recon-import textarea { width: 100%; min-height: 120px; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); resize: vertical; }
+.kpi-group { margin-top: 12px; }
+.kpi-group h3 { font-size: 14px; color: var(--muted); margin-bottom: 6px; }
+.qitem { border: 1px solid var(--approve); border-radius: 10px; padding: 16px 18px; background: color-mix(in srgb, var(--approve-bg) 25%, var(--surface)); }
+.qitem.adj { border-color: var(--border); background: var(--surface); }
+.qitem header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.qitem h3 { font-size: 18px; overflow-wrap: anywhere; }
+.qmeta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 10px 0 0; font-size: 14px; }
+.qmeta dt { color: var(--muted); }
+.qmeta dd { margin: 0; overflow-wrap: anywhere; }
+.qmemo { margin: 10px 0 0; padding: 8px 12px; border-left: 3px solid var(--deny); background: var(--surface-2); font-size: 14px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.qmemo small { display: block; color: var(--muted); margin-bottom: 2px; }
+.cands { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.cands li { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.cands li span { overflow-wrap: anywhere; min-width: 0; }
+@media (max-width: 640px) {
+  .qitem { padding: 14px; }
+  .cands li .btn { width: 100%; }
+  .qmeta { grid-template-columns: 1fr; gap: 0; }
+  .qmeta dt { margin-top: 6px; }
+}
