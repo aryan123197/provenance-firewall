@@ -305,6 +305,42 @@ describe("vendor monthly budgets", () => {
   });
 });
 
+describe("spend digest", () => {
+  const budgeted = loadPolicy(`${readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8")}\nvendorMonthlyBudgets:\n  acme: 10000\n`);
+  const paid = (key: string, cents: number) => {
+    store.decide(intent({ idempotencyKey: key, amount: f("user", cents) }), budgeted);
+    store.saveExecution(key, { state: "executed", retryable: false, payload: {}, reference: `B${key}` });
+  };
+  test("an empty store needs nobody's attention", () => {
+    expect(store.spendDigest()).toMatchObject({ day: "2026-10-27", today: [], pendingApprovals: { count: 0, oldestRequestedAt: null }, attention: 0, budgets: [], needsAttention: false });
+  });
+  test("a budget is ok below 80%, near at 80%, and over once passed, by exact cents", () => {
+    const state = (n: number) => store.spendDigest({ acme: n }).budgets[0]!;
+    paid("a", 7999);
+    expect(state(10000)).toMatchObject({ spent: 7999, percent: 80, state: "ok" });
+    paid("b", 1);
+    expect(state(10000)).toMatchObject({ spent: 8000, percent: 80, state: "near" });
+    paid("c", 2000);
+    expect(state(10000)).toMatchObject({ spent: 10000, percent: 100, state: "near" });
+    expect(state(9999)).toMatchObject({ state: "over" });
+    expect(state(0)).toMatchObject({ percent: 100, state: "over" });
+    expect(store.spendDigest({ acme: 10000 }).needsAttention).toBe(true);
+  });
+  test("today counts only this UTC day; held approvals and unconfirmed payouts need attention", () => {
+    paid("old", 1000);
+    advance(24 * HOUR);
+    store.decide(intent({ idempotencyKey: "held", amount: f("user", 60000) }), budgeted);
+    paid("sent", 500);
+    store.setProviderStatus("sent", "unclaimed");
+    const d = store.spendDigest();
+    expect(d.day).toBe("2026-10-28");
+    expect(d.today).toEqual([{ currency: "USD", spent: 500, held: 60000, blocked: 0 }]);
+    expect(d.pendingApprovals).toEqual({ count: 1, oldestRequestedAt: "2026-10-28T12:00:00.000Z" });
+    expect(d.attention).toBe(1);
+    expect(d.needsAttention).toBe(true);
+  });
+});
+
 describe("policy versions", () => {
   test("there is no active stored policy until one is activated", () => {
     expect(store.activePolicy()).toBeNull();

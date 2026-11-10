@@ -18,6 +18,7 @@ export {
   type ProviderEventInput,
   type ReconcileResult,
   type ResolveApprovalResult,
+  type SpendDigest,
   type SpendLine,
   type SpendOverview,
   type SpendStatus,

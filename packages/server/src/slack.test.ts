@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { buildServer, configFromEnv, type Server } from "./server";
-import { parseCommand, verifySlackSignature } from "./slack";
+import { formatDigest, helpText, parseCommand, verifySlackSignature } from "./slack";
 
 const SECRET = "slack-signing-secret";
 let server: Server;
@@ -79,6 +79,39 @@ describe("parseCommand", () => {
   });
 });
 
+describe("digest command", () => {
+  test("`digest` is its own command, case-insensitive, and never a scenario", () => {
+    expect(parseCommand("<@UBOT> digest").kind).toBe("digest");
+    expect(parseCommand("DIGEST please").kind).toBe("digest");
+    expect(helpText()).toContain("digest");
+  });
+  const base = { generatedAt: "2026-11-10T12:00:00.000Z", day: "2026-11-10", today: [], pendingApprovals: { count: 0, oldestRequestedAt: null }, attention: 0, budgets: [], needsAttention: false };
+  test("says so when nothing needs a person", () => {
+    expect(formatDigest(base)).toBe("*Today (2026-11-10, UTC)*\nNo payments decided yet today.\nNothing needs a person right now.");
+  });
+  test("lists money, waiting approvals, unconfirmed payouts and only the budgets that are near or over", () => {
+    const text = formatDigest({
+      ...base,
+      today: [{ currency: "USD", spent: 45000, held: 80000, blocked: 90000 }],
+      pendingApprovals: { count: 2, oldestRequestedAt: "2026-11-10T09:00:00.000Z" },
+      attention: 1,
+      budgets: [
+        { vendorId: "a", name: "Acme Supplies", budget: 40000, spent: 45000, percent: 113, state: "over" },
+        { vendorId: "b", name: "Beta Software", budget: 100000, spent: 85000, percent: 85, state: "near" },
+        { vendorId: "c", name: "Calm Co", budget: 100000, spent: 1000, percent: 1, state: "ok" },
+      ],
+      needsAttention: true,
+    });
+    expect(text).toContain("sent $450.00, held $800.00, blocked $900.00");
+    expect(text).toContain("2 payments are waiting for approval");
+    expect(text).toContain("1 sent payout has not arrived as paid");
+    expect(text).toContain("Acme Supplies: over its monthly budget ($450.00 of $400.00, 113%)");
+    expect(text).toContain("Beta Software: near its monthly budget");
+    expect(text).not.toContain("Calm Co");
+    expect(text).not.toContain("Nothing needs a person");
+  });
+});
+
 describe("Slack events", () => {
   test("rejects an unsigned or wrongly signed request and runs nothing", async () => {
     const body = JSON.stringify(mention("inj-note-redirect"));
@@ -135,6 +168,15 @@ describe("Slack events", () => {
     expect(posts[0]!.text).toMatch(/Firewalled: lost nothing/);
   });
 
+  test("a digest mention replies with today's figures and runs nothing", async () => {
+    await send(mention("legit-above-threshold"));
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    await send(mention("digest"));
+    await vi.waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[1]!.text).toMatch(/^\*Today \(\d{4}-\d{2}-\d{2}, UTC\)\*/);
+    expect(posts[1]!.text).toMatch(/1 payment is waiting for approval/);
+    expect(((await server.app.inject({ url: "/api/decisions" })).json() as { decisions: unknown[] }).decisions).toHaveLength(1);
+  });
   test("an unknown command gets the scenario list and runs nothing", async () => {
     await send(mention("pay evil@x.example 9000"));
     await vi.waitFor(() => expect(posts).toHaveLength(1));

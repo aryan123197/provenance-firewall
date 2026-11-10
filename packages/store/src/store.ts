@@ -153,6 +153,20 @@ export interface SpendOverview {
   budgets: { vendorId: string; name: string; budget: number; spent: number }[];
 }
 
+export interface SpendDigest {
+  generatedAt: string;
+  /** UTC date the "today" figures are for. */
+  day: string;
+  today: { currency: string; spent: number; held: number; blocked: number }[];
+  pendingApprovals: { count: number; oldestRequestedAt: string | null };
+  /** Sent payouts PayPal did not confirm as paid, and failed sends. */
+  attention: number;
+  /** Every budget in the active policy with where it stands this UTC month: near is 80% or more used, over is past it. */
+  budgets: { vendorId: string; name: string; budget: number; spent: number; percent: number; state: "ok" | "near" | "over" }[];
+  /** True when something here needs a person's eyes: a held payment, a payout to chase, or a budget that is near or over. */
+  needsAttention: boolean;
+}
+
 const OUT = new Set<SpendStatus>(["paid", "sent", "attention"]);
 const ATTENTION = new Set(["unclaimed", "returned", "failed"]);
 const spendStatus = (d: DecisionSummary): SpendStatus => {
@@ -499,6 +513,25 @@ export class Store {
         .map((p) => ({ ...p, vendorName: names.get(p.vendorId) ?? p.vendorId })),
       needsAttention: lines.filter((l) => l.status === "attention" || l.status === "failed"),
       budgets: Object.entries(budgets).map(([vendorId, budget]) => ({ vendorId, name: names.get(vendorId) ?? vendorId, budget, spent: this.vendorSpentThisMonth(this.clock())[vendorId] ?? 0 })),
+    };
+  }
+
+  /** What a person should look at today. Built from the same ledger as the Spend tab, so the two cannot disagree. */
+  spendDigest(budgets: Readonly<Record<string, number>> = {}): SpendDigest {
+    const o = this.spendOverview(budgets);
+    const day = o.generatedAt.slice(0, 10);
+    const pending = this.listApprovals("pending");
+    const oldest = pending.map((a) => a.requestedAt).sort()[0] ?? null;
+    const stateOf = (spent: number, budget: number): "ok" | "near" | "over" => (spent > budget ? "over" : budget > 0 && spent * 100 >= budget * 80 ? "near" : "ok");
+    const rows = o.budgets.map((b) => ({ ...b, percent: b.budget > 0 ? Math.round((b.spent / b.budget) * 100) : b.spent > 0 ? 100 : 0, state: stateOf(b.spent, b.budget) }));
+    return {
+      generatedAt: o.generatedAt,
+      day,
+      today: o.byDay.filter((d) => d.day === day).map(({ currency, spent, held, blocked }) => ({ currency, spent, held, blocked })),
+      pendingApprovals: { count: pending.length, oldestRequestedAt: oldest },
+      attention: o.needsAttention.length,
+      budgets: rows,
+      needsAttention: pending.length > 0 || o.needsAttention.length > 0 || rows.some((b) => b.state !== "ok"),
     };
   }
 

@@ -47,6 +47,18 @@ beforeEach(() => {
   app = createApp({ runtime: () => ({ store, firewall, policy: () => store.activePolicy() ?? policy }), policyYaml: yaml, mode: "simulated", operatorToken: "s3cret-operator-token", scorecard: () => ({ hello: "card" }) });
 });
 
+describe("digest", () => {
+  test("reports held payments, budgets and what needs attention, from the same data as the spend overview", async () => {
+    await firewall.submit(propose({ idempotencyKey: "big", amount: { handle: "user:r#big" } }), (() => { ctx.register("user:r#big", 60000); return ctx; })());
+    const d = (await app.inject({ url: "/api/digest" })).json() as { day: string; needsAttention: boolean; pendingApprovals: { count: number }; today: { held: number }[]; budgets: unknown[] };
+    expect(d.day).toBe("2026-11-04");
+    expect(d.pendingApprovals.count).toBe(1);
+    expect(d.today[0]?.held).toBe(60000);
+    expect(d.needsAttention).toBe(true);
+    expect(d.budgets).toEqual([]);
+  });
+});
+
 describe("spend", () => {
   test("overview rolls up what the firewall decided", async () => {
     await firewall.submit(propose(), ctx);

@@ -372,6 +372,10 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.get<{ Querystring: { after?: string; limit?: string } }>("/api/audit", async (req) => ({
     entries: deps.runtime().store.audit.entries({ after: intParam(req.query.after, 0, 0, Number.MAX_SAFE_INTEGER), limit: intParam(req.query.limit, 200, 1, 1000) }),
   }));
+  app.get("/api/digest", async () => {
+    const { store, policy } = deps.runtime();
+    return store.spendDigest(policy().vendorMonthlyBudgets ?? {});
+  });
   app.get("/api/spend", async () => {
     const { store, policy } = deps.runtime();
     return store.spendOverview(policy().vendorMonthlyBudgets ?? {});

@@ -366,3 +366,6 @@ textarea:disabled, input:disabled { opacity: 0.6; }
 .budget-row .link { margin-left: 6px; }
 .bar-row.budget-row { grid-template-columns: minmax(110px, 170px) 1fr auto; }
 @media (max-width: 600px) { .bar-row.budget-row { grid-template-columns: 1fr; gap: 4px; } }
+.today-strip { background: var(--approve-bg); color: var(--approve); border: 1px solid var(--approve); border-radius: var(--radius); padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.today-strip ul { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.today-strip a { color: inherit; font-weight: 600; }

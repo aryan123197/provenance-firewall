@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { OperatorSignIn } from "./App";
-import { activityColumns } from "./screens/Activity";
+import { TodayStrip, activityColumns } from "./screens/Activity";
 import { scorecardColumns } from "./screens/Policy";
 import { useNarrow } from "./hooks";
 import { outcome } from "./labels";
@@ -834,5 +834,36 @@ describe("Spend", () => {
     mockApi({ ...registry, "GET /api/spend": { status: 500, body: { error: "boom" } } });
     render(<Spend />);
     expect(await screen.findByText(/boom/)).toBeTruthy();
+  });
+});
+
+describe("TodayStrip", () => {
+  const digest = (o: Record<string, unknown>) => ({ generatedAt: "2026-11-10T12:00:00.000Z", day: "2026-11-10", today: [], pendingApprovals: { count: 0, oldestRequestedAt: null }, attention: 0, budgets: [], needsAttention: false, ...o });
+  test("is hidden when nothing needs a person", async () => {
+    const calls = mockApi({ "GET /api/digest": { body: digest({}) } });
+    const { container } = render(<TodayStrip />);
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    expect(container.textContent).toBe("");
+  });
+  test("lists held payments, unconfirmed payouts and only budgets that are near or over", async () => {
+    mockApi({
+      "GET /api/digest": {
+        body: digest({
+          needsAttention: true,
+          pendingApprovals: { count: 2, oldestRequestedAt: "2026-11-10T09:00:00.000Z" },
+          attention: 1,
+          budgets: [
+            { vendorId: "a", name: "Acme Supplies", budget: 40000, spent: 45000, percent: 113, state: "over" },
+            { vendorId: "c", name: "Calm Co", budget: 100000, spent: 1000, percent: 1, state: "ok" },
+          ],
+        }),
+      },
+    });
+    render(<TodayStrip />);
+    expect(await screen.findByText("2 payments are waiting for approval")).toBeTruthy();
+    expect(screen.getByText("1 sent payout has not arrived as paid")).toBeTruthy();
+    expect(screen.getByText("Acme Supplies is over its monthly budget (113%)")).toBeTruthy();
+    expect(screen.queryByText(/Calm Co/)).toBeNull();
+    expect(screen.getByRole("link", { name: "Approvals" }).getAttribute("href")).toBe("#/approvals");
   });
 });

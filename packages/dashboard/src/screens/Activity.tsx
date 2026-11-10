@@ -86,6 +86,7 @@ export function Activity({ open, demo, llm, onChange }: { open: (to: string) => 
 
   return (
     <div className="stack">
+      <TodayStrip />
       {demo && <DemoRunner llm={llm} onRan={() => { void refresh(); onChange(); }} open={open} />}
       <Card
         title="Live activity"
@@ -301,5 +302,24 @@ function DriftDemo({ onDone }: { onDone: () => void }) {
       <button type="button" className="btn subtle" onClick={() => go("unclaimed")}>PayPal reports a payout unclaimed</button>
       {msg && <span className={`small ${msg.ok ? "ok-text" : "bad-text"}`} role="status">{msg.text}</span>}
     </div>
+  );
+}
+
+/** What needs a person today, and nothing else: it is hidden when everything is quiet. The Spend tab has the full picture. */
+export function TodayStrip() {
+  const { data } = usePoll(api.digest, 5000);
+  if (!data?.needsAttention) return null;
+  const items: string[] = [];
+  if (data.pendingApprovals.count > 0) items.push(`${data.pendingApprovals.count} payment${data.pendingApprovals.count === 1 ? " is" : "s are"} waiting for approval`);
+  if (data.attention > 0) items.push(`${data.attention} sent payout${data.attention === 1 ? " has" : "s have"} not arrived as paid`);
+  for (const b of data.budgets.filter((x) => x.state !== "ok")) items.push(`${b.name} is ${b.state === "over" ? "over" : "near"} its monthly budget (${b.percent}%)`);
+  return (
+    <section className="today-strip" aria-label="Needs attention today">
+      <strong>Needs attention</strong>
+      <ul>
+        {items.map((t) => <li key={t}>{t}</li>)}
+      </ul>
+      <a href="#/approvals">Approvals</a> · <a href="#/spend">Spend</a>
+    </section>
   );
 }

@@ -164,7 +164,7 @@ export function buildServer(cfg: ServerConfig): Server {
           runtime = createRuntime();
         },
       }, guard);
-      if (cfg.slack) registerSlack(a, { config: cfg.slack, runner, ...(llmAgent ? { llmAgent } : {}), ...(cfg.slackFetch ? { fetch: cfg.slackFetch } : {}) });
+      if (cfg.slack) registerSlack(a, { config: cfg.slack, runner, digest: () => runtime.store.spendDigest(runtime.policy().vendorMonthlyBudgets ?? {}), ...(llmAgent ? { llmAgent } : {}), ...(cfg.slackFetch ? { fetch: cfg.slackFetch } : {}) });
     },
   });
 
