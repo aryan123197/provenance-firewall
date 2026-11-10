@@ -364,3 +364,5 @@ textarea:disabled, input:disabled { opacity: 0.6; }
 .budget-form { align-items: flex-end; }
 .budget-form select, .budget-form input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; min-width: 150px; }
 .budget-row .link { margin-left: 6px; }
+.bar-row.budget-row { grid-template-columns: minmax(110px, 170px) 1fr auto; }
+@media (max-width: 600px) { .bar-row.budget-row { grid-template-columns: 1fr; gap: 4px; } }

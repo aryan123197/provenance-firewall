@@ -33,6 +33,10 @@ A payout PayPal could not deliver (here: unclaimed) raises a banner, and a long 
 
 ![A banner says one sent payout has not arrived as paid](docs/screenshots/desktop-10-unclaimed-banner.png)
 
+The **Spend** tab rolls up where money went (paid, held, blocked, "money protected"), with per-vendor monthly budgets; here one budget is near its limit and one is over, so the next payment to it would be held for a person:
+
+![The Spend tab: totals, by day and by vendor, monthly budgets, open purchase orders](docs/screenshots/desktop-12-spend.png)
+
 More in [docs/screenshots](docs/screenshots): the vendor registry, the policy and scorecard screen, dark mode, and the dashboard against the real PayPal sandbox.
 
 ## How it works
