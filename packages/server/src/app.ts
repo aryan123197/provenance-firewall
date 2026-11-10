@@ -146,6 +146,13 @@ export function createApp(deps: AppDeps): FastifyInstance {
     }),
   }));
 
+  // Read-only summary for the Analytics tab. Budgets come from the active policy; spend against them is this UTC month, whatever `days` is.
+  app.get<{ Querystring: { days?: string } }>("/api/analytics", async (req) => {
+    const { store, policy } = deps.runtime();
+    const p = policy();
+    return { ...store.analytics(intParam(req.query.days, 30, 1, 90)), currency: p.currency, budgets: p.categoryBudgets, anomaly: p.anomaly ?? null };
+  });
+
   app.get<{ Params: { key: string } }>("/api/decisions/:key", async (req, reply) => {
     const rec = deps.runtime().store.getDecisionRecord(req.params.key);
     return rec ?? reply.code(404).send({ error: "no such decision" });

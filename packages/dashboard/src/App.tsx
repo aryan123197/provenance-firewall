@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, operatorToken } from "./api";
 import { Activity } from "./screens/Activity";
+import { Analytics } from "./screens/Analytics";
 import { Approvals } from "./screens/Approvals";
 import { InvoicesScreen } from "./screens/Invoices";
 import { PolicyScreen } from "./screens/Policy";
@@ -13,6 +14,7 @@ import { shortHash } from "./labels";
 const TABS = [
   { to: "/activity", label: "Live activity" },
   { to: "/approvals", label: "Approvals" },
+  { to: "/analytics", label: "Analytics" },
   { to: "/invoices", label: "Invoices", demoOnly: true },
   { to: "/recon", label: "Close" },
   { to: "/registry", label: "Registry" },
@@ -108,6 +110,8 @@ export function App() {
           <Approvals open={go} onChange={refresh} />
         ) : route === "/invoices" && status?.demo ? (
           <InvoicesScreen llm={Boolean(status.llmAgentAvailable)} onChange={refresh} />
+        ) : route === "/analytics" ? (
+          <Analytics />
         ) : route === "/recon" ? (
           <Recon onChange={refresh} />
         ) : route === "/registry" ? (

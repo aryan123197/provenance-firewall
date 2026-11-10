@@ -14,6 +14,7 @@ import {
   type ResolvedIntent,
   type VendorRecord,
 } from "@pfw/core";
+import { analytics, type Analytics } from "./analytics";
 import { AuditLog, auditRowToEntry, createSigner, type AuditEntry, type Signer } from "./audit";
 import { SCHEMA } from "./schema";
 
@@ -388,6 +389,11 @@ export class Store {
       )
       .all(opts.limit ?? 200, opts.offset ?? 0) as SummaryRow[];
     return rows.map(toSummary);
+  }
+
+  /** Read-only summary for the dashboard's Analytics tab. */
+  analytics(days: number): Analytics {
+    return analytics(this.db, this.clock(), days);
   }
 
   getDecisionRecord(key: string): DecisionRecord | null {

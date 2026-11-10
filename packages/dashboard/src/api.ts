@@ -135,6 +135,27 @@ export interface ScannedInvoice {
   usable: boolean;
 }
 
+export interface AnalyticsView {
+  from: string;
+  to: string;
+  days: number;
+  currency: string;
+  /** Monthly caps per vendor category, from the active policy. */
+  budgets: Record<string, number>;
+  anomaly: { amountMultipleBps: number; minHistory: number } | null;
+  totals: {
+    requests: number;
+    paid: { count: number; amount: number };
+    waiting: { count: number; amount: number };
+    blocked: { count: number; amount: number };
+    alerts: number;
+  };
+  daily: { date: string; paid: number; waiting: number; blocked: number }[];
+  rules: { rule: string; verdict: "deny" | "require_approval"; count: number; amount: number }[];
+  vendors: { id: string | null; name: string; paid: number; count: number }[];
+  categorySpendThisMonth: Record<string, number>;
+}
+
 export interface DemoRun {
   agent: string;
   agentKind: "scripted" | "llm";
@@ -197,6 +218,7 @@ const post = <T>(path: string, body: unknown) => request<T>(path, { method: "POS
 
 export const api = {
   status: () => request<Status>("/api/status"),
+  analytics: (days: number) => request<AnalyticsView>(`/api/analytics?days=${days}`),
   decisions: () => request<{ decisions: DecisionSummary[] }>("/api/decisions").then((r) => r.decisions),
   decision: (key: string) => request<DecisionRecord>(`/api/decisions/${encodeURIComponent(key)}`),
   approvals: () => request<{ approvals: Approval[] }>("/api/approvals").then((r) => r.approvals),

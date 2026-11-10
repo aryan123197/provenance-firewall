@@ -183,6 +183,76 @@ describe("category budgets and anomaly holds", () => {
   });
 });
 
+describe("analytics", () => {
+  const swap = (key: string) => intent({ idempotencyKey: key, account: f("invoice", "evil@sandbox.example"), payee: f("invoice", "Acme Supplies") });
+  const big = (key: string) => intent({ idempotencyKey: key, amount: f("user", 60_000) });
+
+  test("an empty database gives a zero-filled window, not an error", () => {
+    const a = store.analytics(7);
+    expect(a.daily).toHaveLength(7);
+    expect(a.daily.at(-1)!.date).toBe("2026-10-27");
+    expect(a.daily[0]!.date).toBe("2026-10-21");
+    expect(a.totals).toEqual({ requests: 0, paid: { count: 0, amount: 0 }, waiting: { count: 0, amount: 0 }, blocked: { count: 0, amount: 0 }, alerts: 0 });
+    expect(a.rules).toEqual([]);
+    expect(a.vendors).toEqual([]);
+  });
+
+  test("counts paid, waiting and blocked, with amounts, rules, vendors and alerts", () => {
+    store.decide(intent({ idempotencyKey: "a1" }), policy); // paid 45.00
+    store.decide(intent({ idempotencyKey: "a2", amount: f("user", 1000) }), policy); // paid 10.00
+    store.decide(big("a3"), policy); // above threshold: waiting 600.00
+    store.decide(swap("a4"), policy); // denied, with an alert
+    const a = store.analytics(30);
+    expect(a.totals).toEqual({
+      requests: 4,
+      paid: { count: 2, amount: 5500 },
+      waiting: { count: 1, amount: 60_000 },
+      blocked: { count: 1, amount: 4500 },
+      alerts: 1,
+    });
+    expect(a.daily.at(-1)).toMatchObject({ date: "2026-10-27", paid: 2, waiting: 1, blocked: 1 });
+    expect(a.rules).toEqual(expect.arrayContaining([{ rule: "payee_change", verdict: "deny", count: 1, amount: 4500 }, { rule: "approval_threshold", verdict: "require_approval", count: 1, amount: 60_000 }]));
+    expect(a.vendors).toEqual([{ id: "acme", name: "Acme Supplies", paid: 5500, count: 2 }]);
+    expect(a.categorySpendThisMonth).toEqual({ office_supplies: 5500 });
+  });
+
+  test("a held request moves from waiting to paid when approved, and to blocked when rejected", () => {
+    store.decide(big("h1"), policy);
+    store.decide(big("h2"), policy);
+    expect(store.analytics(30).totals.waiting.count).toBe(2);
+    const [x, y] = store.listApprovals("pending");
+    store.resolveApproval(x!.id, { approver: "dana@company.example", approve: true }, policy);
+    store.resolveApproval(y!.id, { approver: "dana@company.example", approve: false }, policy);
+    const t = store.analytics(30).totals;
+    expect(t.waiting.count).toBe(0);
+    expect(t.paid).toEqual({ count: 1, amount: 60_000 });
+    expect(t.blocked).toEqual({ count: 1, amount: 60_000 });
+  });
+
+  test("the window bounds what is counted, and spend this month ignores it", () => {
+    store.decide(intent({ idempotencyKey: "old" }), policy);
+    advance(3 * 24 * HOUR);
+    store.decide(intent({ idempotencyKey: "new", amount: f("user", 2000) }), policy);
+    expect(store.analytics(2).totals.paid).toEqual({ count: 1, amount: 2000 });
+    expect(store.analytics(30).totals.paid).toEqual({ count: 2, amount: 6500 });
+    expect(store.analytics(2).categorySpendThisMonth).toEqual({ office_supplies: 6500 });
+  });
+
+  test("days are clamped and a bad value falls back", () => {
+    expect(store.analytics(0).days).toBe(30);
+    expect(store.analytics(-5).days).toBe(1);
+    expect(store.analytics(100_000).days).toBe(366);
+    expect(store.analytics(Number.NaN).days).toBe(30);
+  });
+
+  test("reading analytics changes nothing", () => {
+    store.decide(intent({ idempotencyKey: "r1" }), policy);
+    const before = { audit: count("audit_log"), decisions: count("decisions"), payments: count("payments") };
+    store.analytics(30);
+    expect({ audit: count("audit_log"), decisions: count("decisions"), payments: count("payments") }).toEqual(before);
+  });
+});
+
 describe("purchase orders", () => {
   const inv = (k: string, amount: number) => intent({ idempotencyKey: k, amount: f("invoice", amount) });
   test("an invoice amount matching an open purchase order is allowed", () => {

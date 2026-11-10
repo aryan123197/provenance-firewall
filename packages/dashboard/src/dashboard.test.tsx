@@ -12,6 +12,7 @@ import { Approvals } from "./screens/Approvals";
 import { PolicyEditor } from "./screens/PolicyEditor";
 import { RegistryScreen } from "./screens/Registry";
 import { InvoicesScreen } from "./screens/Invoices";
+import { Analytics } from "./screens/Analytics";
 
 type Reply = { status?: number; body?: unknown };
 type Route = Reply | ((init: RequestInit | undefined) => Reply);
@@ -791,5 +792,117 @@ describe("invoice scanning", () => {
     await screen.findByText(/could not be read as an amount/);
     expect((screen.getByRole("button", { name: /unprotected agent vs firewall/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: /Claude as the agent/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("analytics", () => {
+  const day = (date: string, paid = 0, waiting = 0, blocked = 0) => ({ date, paid, waiting, blocked });
+  const view = (o: object = {}) => ({
+    from: "2026-10-25",
+    to: "2026-10-27",
+    days: 30,
+    currency: "USD",
+    budgets: { office_supplies: 100_000, software: 50_000, contractors: 20_000 },
+    anomaly: null,
+    totals: { requests: 6, paid: { count: 3, amount: 120_000 }, waiting: { count: 1, amount: 60_000 }, blocked: { count: 2, amount: 90_000 }, alerts: 1 },
+    daily: [day("2026-10-25", 2, 0, 1), day("2026-10-26", 0, 0, 0), day("2026-10-27", 1, 1, 1)],
+    rules: [{ rule: "payee_change", verdict: "deny", count: 2, amount: 90_000 }, { rule: "approval_threshold", verdict: "require_approval", count: 1, amount: 60_000 }],
+    vendors: [{ id: "acme", name: "Acme <b>Supplies</b>", paid: 120_000, count: 3 }],
+    categorySpendThisMonth: { office_supplies: 85_000, software: 50_000, contractors: 5_000, gambling: 1_200 },
+    ...o,
+  });
+  const days = (path: string) => (path.match(/days=(\d+)/) ?? [])[1];
+
+  test("shows the totals, the rules and the vendors, with vendor names inert", async () => {
+    mockApi({ "GET /api/analytics?days=30": { body: view() } });
+    const { container } = render(<Analytics />);
+    await screen.findByText("Requests per day");
+    const tiles = within(container.querySelector(".kpis") as HTMLElement);
+    expect(tiles.getByText("$1,200.00")).toBeTruthy(); // paid
+    expect(tiles.getByText("3 payments")).toBeTruthy();
+    expect(tiles.getByText("$900.00")).toBeTruthy(); // blocked
+    expect(screen.getByText("Payee changed")).toBeTruthy();
+    expect(screen.getByText("Held for approval")).toBeTruthy();
+    // A vendor name is text, never markup.
+    expect(screen.getByText("Acme <b>Supplies</b>")).toBeTruthy();
+    expect(container.querySelector("b > b, li b b")).toBeNull();
+  });
+
+  test("budget meters say what state each category is in, with words and not only colour", async () => {
+    mockApi({ "GET /api/analytics?days=30": { body: view() } });
+    render(<Analytics />);
+    await screen.findByText("Budgets this month");
+    const meters = screen.getAllByRole("meter");
+    expect(meters.map((m) => m.getAttribute("aria-label"))).toEqual(["office_supplies budget used", "software budget used", "contractors budget used"]);
+    expect(screen.getByText(/Near limit/)).toBeTruthy(); // office_supplies at 85%
+    expect(screen.getByText(/At budget/)).toBeTruthy(); // software at 100%
+    expect(meters[2]!.className).toContain("ok"); // contractors at 25%
+    expect(screen.getByText("no budget set")).toBeTruthy(); // gambling has spend but no budget
+  });
+
+  test("with no budgets and no spend it explains how to set one", async () => {
+    mockApi({ "GET /api/analytics?days=30": { body: view({ budgets: {}, categorySpendThisMonth: {} }) } });
+    render(<Analytics />);
+    await screen.findByText("No budgets set");
+    expect(screen.queryAllByRole("meter")).toHaveLength(0);
+  });
+
+  test("an empty period says so instead of drawing an empty chart", async () => {
+    mockApi({ "GET /api/analytics?days=30": { body: view({ daily: [day("2026-10-27")], rules: [], vendors: [], totals: { requests: 0, paid: { count: 0, amount: 0 }, waiting: { count: 0, amount: 0 }, blocked: { count: 0, amount: 0 }, alerts: 0 } }) } });
+    render(<Analytics />);
+    await screen.findByText("No requests in this period");
+    expect(screen.getByText("Nothing was stopped or held")).toBeTruthy();
+    expect(screen.getByText("Nothing was paid in this period")).toBeTruthy();
+  });
+
+  test("changing the range asks for that many days", async () => {
+    const calls = mockApi({ "GET /api/analytics?days=30": { body: view() }, "GET /api/analytics?days=7": { body: view({ days: 7 }) } });
+    const user = userEvent.setup();
+    render(<Analytics />);
+    await screen.findByText("Requests per day");
+    expect(screen.getByRole("button", { name: "Last 30 days" }).getAttribute("aria-pressed")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "Last 7 days" }));
+    await waitFor(() => expect(calls.some((c) => days(c.path) === "7")).toBe(true));
+    expect(screen.getByRole("button", { name: "Last 7 days" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("the table view carries every value the chart shows", async () => {
+    mockApi({ "GET /api/analytics?days=30": { body: view() } });
+    const user = userEvent.setup();
+    render(<Analytics />);
+    await user.click(await screen.findByRole("button", { name: "View as table" }));
+    const table = screen.getByRole("table");
+    const rows = within(table).getAllByRole("row");
+    expect(rows).toHaveLength(4); // header + 3 days
+    expect(within(rows[1]!).getAllByRole("cell").map((c) => c.textContent)).toEqual(["2", "0", "1"]);
+    expect(within(rows[3]!).getAllByRole("cell").map((c) => c.textContent)).toEqual(["1", "1", "1"]);
+    await user.click(screen.getByRole("button", { name: "View as chart" }));
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  test("the chart can be read one day at a time from the keyboard", async () => {
+    mockApi({ "GET /api/analytics?days=30": { body: view() } });
+    const user = userEvent.setup();
+    render(<Analytics />);
+    const chart = await screen.findByRole("slider", { name: /Requests per day/ });
+    chart.focus();
+    await user.keyboard("{ArrowRight}");
+    let tip = screen.getByRole("status");
+    expect(tip.textContent).toContain("Oct 25");
+    expect(tip.textContent).toMatch(/Paid\s*2/);
+    await user.keyboard("{ArrowRight}{ArrowRight}");
+    tip = screen.getByRole("status");
+    expect(tip.textContent).toContain("Oct 27");
+    expect(tip.textContent).toMatch(/Waiting for approval\s*1/);
+    // A screen reader hears the same numbers through the slider's value text.
+    expect(chart.getAttribute("aria-valuetext")).toBe("Oct 27: 1 paid, 1 waiting for approval, 1 blocked");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  test("a failed load shows the error", async () => {
+    mockApi({ "GET /api/analytics?days=30": { status: 500, body: { error: "boom" } } });
+    render(<Analytics />);
+    await screen.findByText("boom");
   });
 });

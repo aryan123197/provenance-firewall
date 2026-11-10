@@ -21,3 +21,4 @@ export {
   type StoreOptions,
 } from "./store";
 export { AuditLog, GENESIS_HASH, createSigner, verifyAuditExport, type AuditEntry, type AuditExport, type AuditVerification, type Signer } from "./audit";
+export { analytics, type Analytics, type DayBucket } from "./analytics";

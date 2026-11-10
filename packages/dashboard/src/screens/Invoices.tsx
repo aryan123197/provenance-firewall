@@ -141,7 +141,7 @@ function ScanCard({ scan, run, busy, llm, onRun }: { scan: ScannedInvoice; run: 
 
 function RunResult({ run }: { run: DemoRun }) {
   const side = (label: string, s: DemoRun["baseline"] | DemoRun["firewalled"]) => (
-    <div className="card inner">
+    <div className="card run-side">
       <h3>{label}</h3>
       <p>{s.payouts.length === 0 ? "Nothing was paid." : s.payouts.map((p) => `Paid ${money(p.amount, p.currency)} to ${p.receiver}`).join("; ")}</p>
       {s.calls.map((c) => (
@@ -155,7 +155,7 @@ function RunResult({ run }: { run: DemoRun }) {
   const key = run.firewalled.calls[0]?.key;
   return (
     <div className="stack" aria-live="polite">
-      <div className="grid two">
+      <div className="two-col">
         {side("Unprotected agent", run.baseline)}
         {side("Same agent behind the firewall", run.firewalled)}
       </div>
