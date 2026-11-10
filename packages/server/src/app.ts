@@ -16,6 +16,7 @@ import {
   type UnsupportedClause,
 } from "@pfw/core";
 import type { Firewall } from "@pfw/firewall";
+import { renderReport, type ReportData } from "./report";
 import { ApprovalStateError, PolicyConflictError, RegistryError, type SpendLine, type Store } from "@pfw/store";
 import { ReconInputError, ReconStateError, ReconStore } from "@pfw/recon";
 import { LlmBudgetError, LlmRefusalError, type PolicyCompiler } from "@pfw/llm";
@@ -372,6 +373,42 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.get<{ Querystring: { after?: string; limit?: string } }>("/api/audit", async (req) => ({
     entries: deps.runtime().store.audit.entries({ after: intParam(req.query.after, 0, 0, Number.MAX_SAFE_INTEGER), limit: intParam(req.query.limit, 200, 1, 1000) }),
   }));
+  const reportData = (): ReportData => {
+    const { store, policy: activePolicy } = deps.runtime();
+    const policy = activePolicy();
+    const budgets = policy.vendorMonthlyBudgets ?? {};
+    const blocked = new Map<string, { rule: string; currency: string; count: number; amount: number }>();
+    for (const l of store.spendLedger().filter((x) => x.status === "denied")) {
+      const k = `${l.rule}|${l.currency}`;
+      const b = blocked.get(k) ?? { rule: l.rule, currency: l.currency, count: 0, amount: 0 };
+      b.count += 1;
+      b.amount += l.amount;
+      blocked.set(k, b);
+    }
+    const overview = store.spendOverview(budgets);
+    return {
+      generatedAt: overview.generatedAt,
+      mode: deps.mode,
+      policy: { name: policy.name, version: policy.version, hash: policy.hash, currency: policy.currency },
+      audit: store.audit.verify(),
+      overview,
+      digest: store.spendDigest(budgets),
+      blockedByRule: [...blocked.values()].sort((a, b) => b.amount - a.amount || a.rule.localeCompare(b.rule)),
+    };
+  };
+  // A report is read by a person and printed, never scripted: no script can run in it, whatever a payee name contains.
+  const REPORT_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
+  app.get("/api/report", async (_req, reply) => {
+    reply.header("content-type", "text/html; charset=utf-8");
+    reply.header("content-security-policy", REPORT_CSP);
+    reply.header("content-disposition", 'inline; filename="spend-report.html"');
+    return renderReport(reportData()).html;
+  });
+  app.get("/api/report.md", async (_req, reply) => {
+    reply.header("content-type", "text/markdown; charset=utf-8");
+    reply.header("content-disposition", 'attachment; filename="spend-report.md"');
+    return renderReport(reportData()).markdown;
+  });
   app.get("/api/digest", async () => {
     const { store, policy } = deps.runtime();
     return store.spendDigest(policy().vendorMonthlyBudgets ?? {});

@@ -19,7 +19,7 @@ Provenance Firewall is a policy layer between an LLM agent and PayPal that track
 - Reconciliation: PayPal webhooks are signature-checked and matched against what was authorized; anything PayPal did that we did not authorize shows up as drift.
 - A red-team harness: 26 scenarios run against an unprotected baseline and the firewalled agent, with a committed scorecard that includes the false-block rate.
 - A Slack input: mention the app with a scenario id and the same run happens against the live firewall, with the verdicts posted in the thread (approving a held payment stays in the dashboard). **[fill after live run: tested only against a stubbed Slack API so far; try it in a real workspace before you claim it]**
-- An operator dashboard: live activity, a Spend tab (totals, per day and per vendor, money protected, CSV ledger), a decision-replay screen that shows each field's source, an approval inbox, a vendor registry, and policy and scorecard. Policies can be written in plain English; a model drafts a patch, and it activates only after generated tests pass and a person confirms.
+- An operator dashboard: live activity with a "needs attention today" strip, a Spend tab (totals, per day and per vendor, money protected, monthly budgets, CSV ledger and a printable report that states whether the audit log verifies), a decision-replay screen that shows each field's source, an approval inbox, a vendor registry, and policy and scorecard. Policies can be written in plain English; a model drafts a patch, and it activates only after generated tests pass and a person confirms.
 
 **Where PayPal is used**
 

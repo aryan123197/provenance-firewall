@@ -822,6 +822,8 @@ describe("Spend", () => {
     expect(screen.getByText("po1")).toBeTruthy();
     expect(screen.getByText(/Needs attention, PayPal unclaimed|Needs attention · PayPal unclaimed/)).toBeTruthy();
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toBe("/api/spend/export.csv");
+    expect(screen.getByRole("link", { name: "Open the printable report" }).getAttribute("href")).toBe("/api/report");
+    expect(screen.getByRole("link", { name: "Download the report as Markdown" }).getAttribute("href")).toBe("/api/report.md");
     expect(screen.getByText("$120.00 of $100.00 · over")).toBeTruthy();
   });
   test("an empty ledger says so and still offers nothing misleading", async () => {

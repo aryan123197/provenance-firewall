@@ -47,6 +47,31 @@ beforeEach(() => {
   app = createApp({ runtime: () => ({ store, firewall, policy: () => store.activePolicy() ?? policy }), policyYaml: yaml, mode: "simulated", operatorToken: "s3cret-operator-token", scorecard: () => ({ hello: "card" }) });
 });
 
+describe("report", () => {
+  test("serves a printable HTML report with a script-blocking policy, and a Markdown download, both showing the verified audit log", async () => {
+    await firewall.submit(propose(), ctx);
+    const html = await app.inject({ url: "/api/report" });
+    expect(html.statusCode).toBe(200);
+    expect(html.headers["content-type"]).toContain("text/html");
+    expect(html.headers["content-security-policy"]).toContain("default-src 'none'");
+    expect(html.body).toContain("The signed, hash-chained audit log verifies");
+    expect(html.body).toContain("Acme Supplies");
+    expect(html.body).toContain("$45.00");
+    const md = await app.inject({ url: "/api/report.md" });
+    expect(md.headers["content-type"]).toContain("text/markdown");
+    expect(md.headers["content-disposition"]).toContain("spend-report.md");
+    expect(md.body).toContain("# Provenance Firewall: spend report");
+  });
+  test("counts what each rule blocked", async () => {
+    ctx.register("invoice:evil#name", "Evil Co");
+    ctx.register("invoice:evil#account", "evil@x.example");
+    await firewall.submit(propose({ idempotencyKey: "evil", payee: { handle: "invoice:evil#name" }, account: { handle: "invoice:evil#account" } }), ctx);
+    const md = (await app.inject({ url: "/api/report.md" })).body;
+    expect(md).toContain("Rule that stopped it");
+    expect(md).toContain(String.raw`untrusted\_payee`);
+  });
+});
+
 describe("digest", () => {
   test("reports held payments, budgets and what needs attention, from the same data as the spend overview", async () => {
     await firewall.submit(propose({ idempotencyKey: "big", amount: { handle: "user:r#big" } }), (() => { ctx.register("user:r#big", 60000); return ctx; })());

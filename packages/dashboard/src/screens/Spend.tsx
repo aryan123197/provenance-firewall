@@ -101,8 +101,12 @@ export function Spend({ demo = false }: { demo?: boolean }) {
           </Scroll>
         </Card>
       )}
-      <p>
+      <p className="export-links">
         <a href="/api/spend/export.csv" download>Download the ledger as CSV</a>
+        {" · "}
+        <a href="/api/report" target="_blank" rel="noopener noreferrer">Open the printable report</a>
+        {" · "}
+        <a href="/api/report.md" download>Download the report as Markdown</a>
       </p>
     </div>
   );
