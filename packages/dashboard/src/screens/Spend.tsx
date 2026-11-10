@@ -14,6 +14,7 @@ const count = (totals: Total[], currency: string, statuses: string[]) =>
 /** Tables scroll inside their card on a phone instead of widening the page; focusable so a keyboard can scroll them. */
 function Scroll({ label, children }: { label: string; children: ReactNode }) {
   return (
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be keyboard-focusable (axe: scrollable-region-focusable)
     <div className="table-scroll" role="region" aria-label={label} tabIndex={0}>
       {children}
     </div>
