@@ -120,6 +120,21 @@ export interface PayCallView {
   message: string;
 }
 
+/** What reading an uploaded invoice produced. Every field is text the document said, not something the firewall trusts. */
+export interface ScannedInvoice {
+  id: string;
+  vendor: string;
+  remitTo?: string;
+  total: number | null;
+  totalText: string;
+  currency: string;
+  lineItems: string[];
+  note?: string;
+  invoiceNumber?: string;
+  warnings: string[];
+  usable: boolean;
+}
+
 export interface DemoRun {
   agent: string;
   agentKind: "scripted" | "llm";
@@ -216,6 +231,9 @@ export const api = {
   auditVerify: () => request<{ ok: boolean; count?: number; reason?: string; seq?: number }>("/api/audit/verify"),
   scenarios: () => request<{ scenarios: DemoScenario[] }>("/api/demo/scenarios").then((r) => r.scenarios),
   runScenario: (scenarioId: string, agent: "scripted" | "llm", request?: string) => post<DemoRun>("/api/demo/run", { scenarioId, agent, ...(request ? { request } : {}) }),
+  scans: () => request<{ scanner: boolean; scans: ScannedInvoice[] }>("/api/invoices"),
+  scanInvoice: (mediaType: string, data: string) => post<ScannedInvoice>("/api/invoices/scan", { mediaType, data }),
+  runScan: (id: string, agent: "scripted" | "llm") => post<DemoRun>(`/api/invoices/${encodeURIComponent(id)}/run`, { agent }),
   simulateDrift: (kind: "unauthorized" | "mismatch" | "unclaimed") => post<{ result: string }>("/api/demo/simulate-drift", { kind }),
   resetDemo: () => post<{ ok: true }>("/api/demo/reset", {}),
 };

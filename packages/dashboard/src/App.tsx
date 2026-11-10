@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, operatorToken } from "./api";
 import { Activity } from "./screens/Activity";
 import { Approvals } from "./screens/Approvals";
+import { InvoicesScreen } from "./screens/Invoices";
 import { PolicyScreen } from "./screens/Policy";
 import { RegistryScreen } from "./screens/Registry";
 import { Recon } from "./screens/Recon";
@@ -12,10 +13,11 @@ import { shortHash } from "./labels";
 const TABS = [
   { to: "/activity", label: "Live activity" },
   { to: "/approvals", label: "Approvals" },
+  { to: "/invoices", label: "Invoices", demoOnly: true },
   { to: "/recon", label: "Close" },
   { to: "/registry", label: "Registry" },
   { to: "/policy", label: "Policy & scorecard" },
-] as const;
+] as readonly { to: string; label: string; demoOnly?: boolean }[];
 
 const SEEN_KEY = "pfw.payouts-attention-seen";
 const readSeen = () => {
@@ -47,7 +49,7 @@ export function App() {
           <span>Provenance Firewall</span>
         </div>
         <nav aria-label="Main">
-          {TABS.map((t) => (
+          {TABS.filter((t) => !t.demoOnly || status?.demo).map((t) => (
             <a key={t.to} href={`#${t.to}`} aria-current={active === t.to ? "page" : undefined}>
               {t.label}
               {t.to === "/approvals" && status && status.pendingApprovals > 0 && <span className="badge">{status.pendingApprovals}</span>}
@@ -104,6 +106,8 @@ export function App() {
           <Replay id={decodeURIComponent(decisionMatch[1]!)} back={() => go("/activity")} open={go} />
         ) : route === "/approvals" ? (
           <Approvals open={go} onChange={refresh} />
+        ) : route === "/invoices" && status?.demo ? (
+          <InvoicesScreen llm={Boolean(status.llmAgentAvailable)} onChange={refresh} />
         ) : route === "/recon" ? (
           <Recon onChange={refresh} />
         ) : route === "/registry" ? (

@@ -9,9 +9,10 @@ import { createFakePayPal } from "@pfw/adapter/testing";
 import { Firewall } from "@pfw/firewall";
 import { createSigner, Store } from "@pfw/store";
 import { VENDORS, type Agent } from "@pfw/harness";
-import { AnthropicPolicyCompiler, LlmAgent, createClient, withDailyBudget, type MessagesClient, type PolicyCompiler } from "@pfw/llm";
+import { AnthropicInvoiceScanner, AnthropicPolicyCompiler, LlmAgent, createClient, withDailyBudget, type InvoiceScanner, type MessagesClient, type PolicyCompiler } from "@pfw/llm";
 import { createApp, type Runtime } from "./app";
 import { registerDemo } from "./demo";
+import { registerInvoices } from "./invoices";
 import { registerSlack, type SlackConfig } from "./slack";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -46,6 +47,8 @@ export interface ServerConfig {
   slackFetch?: typeof fetch;
   compiler?: PolicyCompiler;
   llmAgent?: Agent;
+  /** Reads uploaded invoices. Defaults to a Claude scanner when an API key is configured. */
+  scanner?: InvoiceScanner;
 }
 
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -139,6 +142,7 @@ export function buildServer(cfg: ServerConfig): Server {
   const llm = raw ? withDailyBudget(raw, cfg.llmDailyCalls) : null;
   const compiler = cfg.compiler ?? (llm ? new AnthropicPolicyCompiler(llm) : undefined);
   const llmAgent = cfg.llmAgent ?? (llm ? new LlmAgent({ client: llm }) : undefined);
+  const scanner = cfg.scanner ?? (llm ? new AnthropicInvoiceScanner({ client: llm }) : undefined);
 
   const app = createApp({
     runtime: () => runtime,
@@ -164,6 +168,7 @@ export function buildServer(cfg: ServerConfig): Server {
           runtime = createRuntime();
         },
       }, guard);
+      registerInvoices(a, { runtime: () => runtime, runner, ...(scanner ? { scanner } : {}), ...(llmAgent ? { llmAgent } : {}) }, guard);
       if (cfg.slack) registerSlack(a, { config: cfg.slack, runner, ...(llmAgent ? { llmAgent } : {}), ...(cfg.slackFetch ? { fetch: cfg.slackFetch } : {}) });
     },
   });
