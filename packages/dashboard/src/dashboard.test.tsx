@@ -737,8 +737,53 @@ describe("Spend", () => {
     budgets: [{ vendorId: "acme", name: "Acme Supplies", budget: 10000, spent: 12000 }],
   };
 
+  const registry = { "GET /api/registry": { body: { vendors: [{ id: "acme", name: "Acme Supplies", account: "a", category: "office_supplies" }], purchaseOrders: [] } } };
+
+  test("setting a budget sends a one-field policy patch with the person's name; bad input sends nothing", async () => {
+    const calls = mockApi({
+      "GET /api/spend": { body: { ...overview, budgets: [] } },
+      ...registry,
+      "GET /api/policy": { body: { policy: { version: 3 } } },
+      "POST /api/policy/activate": { body: { ok: true, version: 4 } },
+    });
+    const user = userEvent.setup();
+    render(<Spend />);
+    await screen.findByText("Spend in USD");
+    expect(screen.getByText(/No budgets set/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Set budget" }));
+    expect(await screen.findByText("Choose a vendor.")).toBeTruthy();
+    await user.selectOptions(await screen.findByLabelText("Vendor"), "acme");
+    await user.type(screen.getByLabelText(/Budget per month/), "abc");
+    await user.click(screen.getByRole("button", { name: "Set budget" }));
+    expect(await screen.findByText(/Enter the monthly budget in dollars/)).toBeTruthy();
+    await user.clear(screen.getByLabelText(/Budget per month/));
+    await user.type(screen.getByLabelText(/Budget per month/), "2000.50");
+    await user.click(screen.getByRole("button", { name: "Set budget" }));
+    expect(await screen.findByText(/Enter your name/)).toBeTruthy();
+    await user.type(screen.getByLabelText("Your name"), "dana@company.example");
+    await user.click(screen.getByRole("button", { name: "Set budget" }));
+    expect(await screen.findByText(/Budget set for acme \(policy v4\)/)).toBeTruthy();
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.body).toEqual({ baseVersion: 3, patch: { vendorMonthlyBudgets: { acme: 200050 } }, confirmedBy: "dana@company.example" });
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+  test("removing a budget sends null, and a refused change shows the server's reason", async () => {
+    const calls = mockApi({
+      "GET /api/spend": { body: overview },
+      ...registry,
+      "GET /api/policy": { body: { policy: { version: 3 } } },
+      "POST /api/policy/activate": { status: 409, body: { error: "policy changed, reload" } },
+    });
+    localStorage.setItem("pfw.approver", "dana@company.example");
+    const user = userEvent.setup();
+    render(<Spend />);
+    await user.click(await screen.findByRole("button", { name: "Remove the budget for Acme Supplies" }));
+    expect(await screen.findByText(/policy changed, reload/)).toBeTruthy();
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ patch: { vendorMonthlyBudgets: { acme: null } } });
+  });
+
   test("shows totals, money protected, unregistered payees, open orders, attention rows and the CSV link", async () => {
-    mockApi({ "GET /api/spend": { body: overview } });
+    mockApi({ "GET /api/spend": { body: overview }, ...registry });
     render(<Spend />);
     expect(await screen.findByText("Spend in USD")).toBeTruthy();
     expect(screen.getByText("Money protected · 1 blocked").previousSibling?.textContent).toBe("$450.00");
@@ -751,13 +796,13 @@ describe("Spend", () => {
     expect(screen.getByText("$120.00 of $100.00 · over")).toBeTruthy();
   });
   test("an empty ledger says so and still offers nothing misleading", async () => {
-    mockApi({ "GET /api/spend": { body: { ...overview, totals: [], byDay: [], byVendor: [], moneyProtected: [], openCommitments: [], needsAttention: [], budgets: [] } } });
+    mockApi({ ...registry, "GET /api/spend": { body: { ...overview, totals: [], byDay: [], byVendor: [], moneyProtected: [], openCommitments: [], needsAttention: [], budgets: [] } } });
     render(<Spend />);
     expect(await screen.findByText("No payments yet")).toBeTruthy();
     expect(screen.getByText("Nothing outstanding.")).toBeTruthy();
   });
   test("an API failure is shown", async () => {
-    mockApi({ "GET /api/spend": { status: 500, body: { error: "boom" } } });
+    mockApi({ ...registry, "GET /api/spend": { status: 500, body: { error: "boom" } } });
     render(<Spend />);
     expect(await screen.findByText(/boom/)).toBeTruthy();
   });

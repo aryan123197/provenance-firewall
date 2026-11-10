@@ -361,3 +361,6 @@ textarea:disabled, input:disabled { opacity: 0.6; }
 .table-scroll { overflow-x: auto; max-width: 100%; }
 .table-scroll table { min-width: 460px; }
 .table-scroll td .bar { margin-top: 4px; min-width: 70px; }
+.budget-form { align-items: flex-end; }
+.budget-form select, .budget-form input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; min-width: 150px; }
+.budget-row .link { margin-left: 6px; }

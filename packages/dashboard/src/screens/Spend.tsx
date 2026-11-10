@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { api, type SpendLine, type SpendOverview } from "../api";
 import { Card, Empty, ErrorNote } from "../components/ui";
 import { usePoll } from "../hooks";
@@ -61,23 +61,7 @@ export function Spend() {
       {currencies.map((c) => (
         <CurrencySection key={c} currency={c} data={data} />
       ))}
-      {data.budgets.length > 0 && (
-        <Card title="Monthly budgets" aside="This UTC month. Past a budget, a payment is held for a person.">
-          {data.budgets.map((b) => {
-            const over = b.spent > b.budget;
-            const cur = data.totals[0]?.currency ?? "USD";
-            return (
-              <div className="bar-row" key={b.vendorId}>
-                <span>{b.name}</span>
-                <div className="bar" aria-hidden="true">
-                  <i className={over ? "bad" : "good"} style={{ width: `${b.budget > 0 ? Math.min(100, Math.round((b.spent / b.budget) * 100)) : 100}%` }} />
-                </div>
-                <span>{money(b.spent, cur)} of {money(b.budget, cur)}{over ? " · over" : ""}</span>
-              </div>
-            );
-          })}
-        </Card>
-      )}
+      <Budgets data={data} />
       <Card title={`Open purchase orders · ${data.openCommitments.length}`} aside="Approved to buy, not yet paid">
         {data.openCommitments.length === 0 ? (
           <p className="muted">Nothing outstanding.</p>
@@ -179,6 +163,95 @@ function CurrencySection({ currency, data }: { currency: string; data: SpendOver
         </table>
         </Scroll>
       </div>
+    </Card>
+  );
+}
+
+const NAME_KEY = "pfw.approver";
+const readName = () => {
+  try {
+    return localStorage.getItem(NAME_KEY) ?? "";
+  } catch {
+    return "";
+  }
+};
+
+/** Monthly budgets: progress for the ones set, and a form to set or remove one. Changing one is a tested, attributed policy change. */
+function Budgets({ data }: { data: SpendOverview }) {
+  const { data: registry } = usePoll(api.registry, 10_000);
+  const [vendor, setVendor] = useState("");
+  const [dollars, setDollars] = useState("");
+  const [name, setName] = useState(readName);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const cur = data.totals[0]?.currency ?? "USD";
+
+  const apply = async (vendorId: string, amountMinor: number | null) => {
+    if (!name.trim()) return setNote({ ok: false, text: "Enter your name so the change is attributed to you." });
+    try {
+      localStorage.setItem(NAME_KEY, name.trim());
+    } catch {
+      /* private mode: skip remembering */
+    }
+    setBusy(true);
+    try {
+      const r = await api.setBudget(vendorId, amountMinor, name.trim());
+      setNote({ ok: true, text: amountMinor === null ? `Removed the budget for ${vendorId} (policy v${r.version}).` : `Budget set for ${vendorId} (policy v${r.version}). It applies from the next payment.` });
+      if (amountMinor !== null) setDollars("");
+    } catch (e) {
+      setNote({ ok: false, text: e instanceof Error ? e.message : "Could not change the budget." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = () => {
+    const n = Number(dollars);
+    if (!vendor) return setNote({ ok: false, text: "Choose a vendor." });
+    if (dollars.trim() === "" || !Number.isFinite(n) || n < 0) return setNote({ ok: false, text: "Enter the monthly budget in dollars, for example 2000." });
+    void apply(vendor, Math.round(n * 100));
+  };
+
+  return (
+    <Card title="Monthly budgets" aside="This UTC month. Past a budget, a payment is held for a person.">
+      {data.budgets.length === 0 ? (
+        <p className="muted">No budgets set. Without one, only the daily caps limit a vendor.</p>
+      ) : (
+        data.budgets.map((b) => {
+          const over = b.spent > b.budget;
+          return (
+            <div className="bar-row budget-row" key={b.vendorId}>
+              <span>{b.name}</span>
+              <div className="bar" aria-hidden="true">
+                <i className={over ? "bad" : "good"} style={{ width: `${b.budget > 0 ? Math.min(100, Math.round((b.spent / b.budget) * 100)) : 100}%` }} />
+              </div>
+              <span>
+                {money(b.spent, cur)} of {money(b.budget, cur)}{over ? " · over" : ""}{" "}
+                <button type="button" className="link" disabled={busy} onClick={() => void apply(b.vendorId, null)} aria-label={`Remove the budget for ${b.name}`}>Remove</button>
+              </span>
+            </div>
+          );
+        })
+      )}
+      <div className="row budget-form">
+        <label className="field">
+          <span>Vendor</span>
+          <select value={vendor} onChange={(e) => setVendor(e.target.value)}>
+            <option value="">Choose…</option>
+            {(registry?.vendors ?? []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span>Budget per month ({cur})</span>
+          <input inputMode="decimal" value={dollars} onChange={(e) => setDollars(e.target.value)} placeholder="2000" />
+        </label>
+        <label className="field">
+          <span>Your name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="you@company.example" autoComplete="name" />
+        </label>
+        <button type="button" className="btn primary" disabled={busy} onClick={submit}>{busy ? "Saving…" : "Set budget"}</button>
+      </div>
+      {note && <p className={`result ${note.ok ? "ok" : "bad"}`} role="status">{note.text}</p>}
     </Card>
   );
 }

@@ -202,6 +202,11 @@ export const api = {
   reconReopen: (id: string, reopenedBy: string) => post<AdjustmentRecord>(`/api/recon/adjustments/${encodeURIComponent(id)}/reopen`, { reopenedBy }),
   drift: () => request<{ drift: Drift[] }>("/api/drift").then((r) => r.drift),
   policy: () => request<PolicyView>("/api/policy"),
+  /** Sets (or, with null, removes) one vendor's monthly budget: a one-field policy patch through the normal tested activation. */
+  setBudget: async (vendorId: string, amountMinor: number | null, confirmedBy: string) => {
+    const { policy } = await request<PolicyView>("/api/policy");
+    return post<{ ok: true; version: number }>("/api/policy/activate", { baseVersion: policy.version, patch: { vendorMonthlyBudgets: { [vendorId]: amountMinor } }, confirmedBy });
+  },
   compilePolicy: (english: string) => post<CompileResult>("/api/policy/compile", { english }),
   activatePolicy: (c: CompileResult, confirmedBy: string, acknowledgeUnsupported: boolean) =>
     post<{ ok: true; version: number }>("/api/policy/activate", {

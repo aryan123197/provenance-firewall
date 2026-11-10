@@ -343,6 +343,10 @@ export function createApp(deps: AppDeps): FastifyInstance {
     let result: ReturnType<typeof review>;
     try {
       examples = examplesSchema.parse(b.examples ?? []);
+      // A budget for an id that is not in the registry would never apply, so setting one is refused rather than silently ignored.
+      const known = new Set(store.listVendors().map((v) => v.id));
+      const unknown = Object.entries(PolicyPatchSchema.parse(b.patch ?? {}).vendorMonthlyBudgets ?? {}).filter(([id, v]) => v !== null && !known.has(id)).map(([id]) => id);
+      if (unknown.length > 0) return reply.code(400).send({ error: `No registered vendor has the id ${unknown.join(", ")}, so a budget for it would never apply.` });
       result = review(active, b.patch ?? {}, examples);
     } catch (e) {
       return reply.code(400).send({ error: e instanceof Error ? `That change is not a valid policy: ${e.message}` : "invalid policy change" });

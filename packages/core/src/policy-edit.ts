@@ -17,6 +17,8 @@ export const PolicyPatchSchema = z
     /** Entries are merged into the existing map; `null` removes an override. */
     categoryApprovalThresholds: z.record(z.string().min(1), Minor.nullable()).optional(),
     newPayeeDenyDays: z.array(z.number().int().min(0).max(6)).optional(),
+    /** Monthly budget per vendor id, merged into the existing map; `null` removes one. */
+    vendorMonthlyBudgets: z.record(z.string().min(1), Minor.nullable()).optional(),
   })
   .strict();
 export type PolicyPatch = z.infer<typeof PolicyPatchSchema>;
@@ -34,6 +36,11 @@ export function applyPatch(active: PolicyDoc, patch: PolicyPatch): PolicyDoc {
     if (v === null) delete thresholds[cat];
     else thresholds[cat] = v;
   }
+  const budgets: Record<string, number> = { ...active.vendorMonthlyBudgets };
+  for (const [vendor, v] of Object.entries(p.vendorMonthlyBudgets ?? {})) {
+    if (v === null) delete budgets[vendor];
+    else budgets[vendor] = v;
+  }
   const next = {
     name: active.name,
     version: active.version + 1,
@@ -45,6 +52,8 @@ export function applyPatch(active: PolicyDoc, patch: PolicyPatch): PolicyDoc {
     velocity: { ...active.velocity, ...stripUndefined(p.velocity ?? {}) },
     categoryApprovalThresholds: thresholds,
     newPayeeDenyDays: [...new Set(p.newPayeeDenyDays ?? active.newPayeeDenyDays)].sort((a, b) => a - b),
+    // Left out when empty, so a policy without budgets keeps the hash it had before budgets existed.
+    ...(Object.keys(budgets).length > 0 ? { vendorMonthlyBudgets: budgets } : {}),
   };
   return PolicySchema.parse(next);
 }
@@ -107,6 +116,22 @@ export function diffPolicy(a: PolicyDoc, b: PolicyDoc): PolicyChange[] {
     });
   }
 
+  const ba = a.vendorMonthlyBudgets ?? {};
+  const bb = b.vendorMonthlyBudgets ?? {};
+  for (const vendor of new Set([...Object.keys(ba), ...Object.keys(bb)])) {
+    const x = ba[vendor];
+    const y = bb[vendor];
+    if (x === y) continue;
+    out.push({
+      path: `vendorMonthlyBudgets.${vendor}`,
+      label: `Monthly budget, ${vendor}`,
+      before: x === undefined ? "none" : money(x),
+      after: y === undefined ? "none" : money(y),
+      // No budget is the loosest setting: setting one tightens, removing one loosens.
+      direction: x === undefined ? "tighter" : y === undefined ? "looser" : y > x ? "looser" : "tighter",
+    });
+  }
+
   const days = (d: number[]) => (d.length ? d.map((n) => DAYS[n]).join(", ") : "never");
   const sameDays = a.newPayeeDenyDays.join() === b.newPayeeDenyDays.join();
   if (!sameDays) {
@@ -132,6 +157,9 @@ export function lintPolicy(p: PolicyDoc): string[] {
   }
   if (p.limits.perPayment > p.limits.totalPerDay) w.push("The per-payment cap is above the daily total cap.");
   if (cap === 0) w.push("A limit of $0 blocks every payment.");
+  for (const [vendor, budget] of Object.entries(p.vendorMonthlyBudgets ?? {})) {
+    if (budget === 0) w.push(`The monthly budget for ${vendor} is $0, so every payment to it is held for approval.`);
+  }
   return w;
 }
 

@@ -134,6 +134,20 @@ describe("activate", () => {
     expect(audit.entries.find((e) => e.type === "policy_activated")?.payload).toMatchObject({ confirmedBy: "dana@company.example" });
     expect((await server.app.inject({ url: "/api/audit/verify" })).json()).toMatchObject({ ok: true });
   });
+  test("a budget for a registered vendor activates and is reported; one for an unknown id is refused", async () => {
+    const vendor = "acme";
+    const added = await server.app.inject({ method: "POST", url: "/api/registry/vendors", headers: op, payload: { id: vendor, name: "Acme Supplies", account: "acme@sandbox.example", category: "office_supplies", changedBy: "dana@company.example" } });
+    expect(added.statusCode).toBe(200);
+    const unknown = await activate({ baseVersion: 1, patch: { vendorMonthlyBudgets: { nobody: 1000 } }, confirmedBy: "dana@company.example" });
+    expect(unknown.statusCode).toBe(400);
+    expect(unknown.json().error).toContain("nobody");
+    const ok = await activate({ baseVersion: 1, patch: { vendorMonthlyBudgets: { [vendor]: 20_000 } }, confirmedBy: "dana@company.example" });
+    expect(ok.statusCode).toBe(200);
+    const view = (await server.app.inject({ url: "/api/policy" })).json() as { policy: { vendorMonthlyBudgets: Record<string, number> } };
+    expect(view.policy.vendorMonthlyBudgets).toEqual({ [vendor]: 20_000 });
+    const spend = (await server.app.inject({ url: "/api/spend" })).json() as { budgets: { vendorId: string; budget: number }[] };
+    expect(spend.budgets).toMatchObject([{ vendorId: vendor, budget: 20_000 }]);
+  });
   test("failing tests block activation even if the browser claims otherwise", async () => {
     output = { ...SPEC_OUTPUT, patch: { categoryApprovalThresholds: { contractors: 500 } } };
     const r = await activate(await confirmed());
