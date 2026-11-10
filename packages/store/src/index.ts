@@ -18,6 +18,9 @@ export {
   type ProviderEventInput,
   type ReconcileResult,
   type ResolveApprovalResult,
+  type SpendLine,
+  type SpendOverview,
+  type SpendStatus,
   type StoreOptions,
 } from "./store";
 export { AuditLog, GENESIS_HASH, createSigner, verifyAuditExport, type AuditEntry, type AuditExport, type AuditVerification, type Signer } from "./audit";

@@ -357,3 +357,7 @@ textarea:disabled, input:disabled { opacity: 0.6; }
   .qmeta { grid-template-columns: 1fr; gap: 0; }
   .qmeta dt { margin-top: 6px; }
 }
+
+.table-scroll { overflow-x: auto; max-width: 100%; }
+.table-scroll table { min-width: 460px; }
+.table-scroll td .bar { margin-top: 4px; min-width: 70px; }

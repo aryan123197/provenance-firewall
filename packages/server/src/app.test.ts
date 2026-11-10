@@ -4,6 +4,7 @@ import { ProvenanceContext, loadPolicy } from "@pfw/core";
 import { Authority, PayPalAdapter } from "@pfw/adapter";
 import { createFakePayPal, fakeWebhookHeaders } from "@pfw/adapter/testing";
 import { Firewall } from "@pfw/firewall";
+import { tag } from "@pfw/core";
 import { Store } from "@pfw/store";
 import { createApp } from "./app";
 
@@ -27,6 +28,7 @@ const propose = (o: Record<string, unknown> = {}) => ({
   category: { handle: "vendor:acme#category" },
   ...o,
 });
+const tagged = <T,>(v: T) => tag(v, { kind: "invoice", ref: "invoice:x" });
 const op = { authorization: "Bearer s3cret-operator-token" };
 
 beforeEach(() => {
@@ -43,6 +45,28 @@ beforeEach(() => {
   ctx.register("user:r#currency", "USD");
   ctx.register("invoice:i#total", 4500);
   app = createApp({ runtime: () => ({ store, firewall, policy: () => store.activePolicy() ?? policy }), policyYaml: yaml, mode: "simulated", operatorToken: "s3cret-operator-token", scorecard: () => ({ hello: "card" }) });
+});
+
+describe("spend", () => {
+  test("overview rolls up what the firewall decided", async () => {
+    await firewall.submit(propose(), ctx);
+    const r = await app.inject({ url: "/api/spend" });
+    expect(r.statusCode).toBe(200);
+    const o = r.json() as { totals: { status: string; amount: number }[]; byVendor: { name: string }[] };
+    expect(o.totals.reduce((n, t) => n + t.amount, 0)).toBe(4500);
+    expect(o.byVendor[0]?.name).toBe("Acme Supplies");
+  });
+  test("the CSV is a download and defuses spreadsheet formulas from untrusted payee names", async () => {
+    await firewall.submit(propose(), ctx);
+    store.decide({ agentId: "a", idempotencyKey: "evil", payee: tagged("=HYPERLINK(\"http://evil\",\"x\"),y"), account: tagged("acct"), amount: tagged(100), currency: tagged("USD"), category: tagged("x") } as never, policy);
+    const r = await app.inject({ url: "/api/spend/export.csv" });
+    expect(r.headers["content-type"]).toContain("text/csv");
+    expect(r.headers["content-disposition"]).toContain("spend-ledger.csv");
+    const lines = r.body.trim().split("\r\n");
+    expect(lines[0]).toBe("date,status,verdict,rule,payee,account,vendor_id,amount,currency,provider_status,agent,key");
+    expect(lines.some((l) => l.includes('"\'=HYPERLINK(""http://evil"",""x""),y"'))).toBe(true);
+    expect(lines.some((l) => l.includes("Acme Supplies") && l.includes("45.00"))).toBe(true);
+  });
 });
 
 describe("read endpoints", () => {

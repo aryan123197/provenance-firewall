@@ -72,7 +72,7 @@ try {
   }
 
   const key = ((await (await fetch(`${base}/api/decisions`)).json()) as { decisions: { idempotencyKey: string }[] }).decisions[0]?.idempotencyKey;
-  const routes = ["#/activity", "#/approvals", "#/recon", "#/registry", "#/policy", ...(key ? [`#/decision/${encodeURIComponent(key)}`] : [])];
+  const routes = ["#/activity", "#/approvals", "#/spend", "#/recon", "#/registry", "#/policy", ...(key ? [`#/decision/${encodeURIComponent(key)}`] : [])];
 
   const browser = await chromium.launch();
   const sizes = [

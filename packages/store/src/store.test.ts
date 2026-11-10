@@ -229,6 +229,63 @@ describe("dashboard queries", () => {
   });
 });
 
+describe("spend overview", () => {
+  test("an empty store has empty totals", () => {
+    expect(store.spendOverview()).toMatchObject({ totals: [], byDay: [], byVendor: [], moneyProtected: [], needsAttention: [], openCommitments: [] });
+  });
+  test("rolls up paid, held and denied money, and counts denied and rejected as protected", () => {
+    store.addPurchaseOrder({ id: "po1", vendorId: "acme", amount: 9000, currency: "USD" });
+    store.decide(intent({ idempotencyKey: "paid" }), policy);
+    store.saveExecution("paid", { state: "executed", retryable: false, payload: {}, reference: "B1" });
+    store.setProviderStatus("paid", "success");
+    store.decide(intent({ idempotencyKey: "held", amount: f("user", 60000) }), policy);
+    store.decide(intent({ idempotencyKey: "swap", account: f("invoice", "acct_evil"), payee: f("invoice", "Evil Co") }), policy);
+    store.decide(intent({ idempotencyKey: "sent", amount: f("user", 1000) }), policy);
+    store.saveExecution("sent", { state: "executed", retryable: false, payload: {}, reference: "B2" });
+    store.decide(intent({ idempotencyKey: "gone", amount: f("user", 2000) }), policy);
+    store.saveExecution("gone", { state: "executed", retryable: false, payload: {}, reference: "B3" });
+    store.setProviderStatus("gone", "unclaimed");
+    store.decide(intent({ idempotencyKey: "boom", amount: f("user", 3000) }), policy);
+    store.saveExecution("boom", { state: "failed", retryable: false, payload: {} });
+    store.decide(intent({ idempotencyKey: "queued", amount: f("user", 500) }), policy);
+
+    const o = store.spendOverview();
+    const status = Object.fromEntries(o.totals.map((t) => [t.status, t]));
+    expect(status.paid).toMatchObject({ count: 1, amount: 4500 });
+    expect(status.sent).toMatchObject({ count: 1, amount: 1000 });
+    expect(status.attention).toMatchObject({ count: 1, amount: 2000 });
+    expect(status.failed).toMatchObject({ count: 1, amount: 3000 });
+    expect(status.held).toMatchObject({ count: 1, amount: 60000 });
+    expect(status.queued).toMatchObject({ count: 1, amount: 500 });
+    expect(status.denied?.count).toBe(1);
+    expect(o.moneyProtected).toEqual([{ currency: "USD", count: 1, amount: status.denied!.amount }]);
+    expect(o.needsAttention.map((l) => l.idempotencyKey).sort()).toEqual(["boom", "gone"]);
+    expect(o.openCommitments).toEqual([{ id: "po1", vendorId: "acme", amount: 9000, currency: "USD", status: "open", vendorName: "Acme Supplies" }]);
+    const acme = o.byVendor.find((v) => v.vendorId === "acme")!;
+    expect(acme).toMatchObject({ name: "Acme Supplies", currency: "USD", payments: 3, spent: 7500 });
+    expect(o.byVendor.some((v) => v.vendorId === null && v.name === "Evil Co" && v.blocked > 0)).toBe(true);
+  });
+  test("a rejected approval counts as money that did not move", () => {
+    store.decide(intent({ idempotencyKey: "big", amount: f("user", 60000) }), policy);
+    const id = store.listApprovals("pending")[0]!.id;
+    store.resolveApproval(id, { approve: false, approver: "alice" }, policy);
+    expect(store.spendOverview().moneyProtected).toEqual([{ currency: "USD", count: 1, amount: 60000 }]);
+  });
+  test("days are UTC buckets and currencies are never added together", () => {
+    store.decide(intent({ idempotencyKey: "d1" }), policy);
+    advance(24 * HOUR);
+    store.decide(intent({ idempotencyKey: "d2", amount: f("user", 1000) }), policy);
+    store.decide(intent({ idempotencyKey: "eur", currency: f("user", "EUR") }), policy);
+    const days = store.spendOverview().byDay;
+    expect(days.filter((d) => d.currency === "USD").map((d) => [d.day, d.spent + d.held + d.blocked])).toEqual([["2026-10-27", 4500], ["2026-10-28", 1000]]);
+    expect(days.some((d) => d.currency === "EUR")).toBe(true);
+  });
+  test("the ledger is not capped like the activity feed", () => {
+    for (let n = 0; n < 505; n++) store.decide(intent({ idempotencyKey: `k${n}`, amount: f("user", 1) }), policy);
+    expect(store.spendLedger()).toHaveLength(505);
+  });
+});
+
 describe("policy versions", () => {
   test("there is no active stored policy until one is activated", () => {
     expect(store.activePolicy()).toBeNull();

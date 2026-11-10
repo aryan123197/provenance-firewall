@@ -1,11 +1,12 @@
 import type { Decision } from "@pfw/core";
-import type { Approval, AuditEntry, DecisionRecord, DecisionSummary, Drift } from "@pfw/store";
+import type { Approval, AuditEntry, DecisionRecord, DecisionSummary, Drift, SpendLine, SpendOverview } from "@pfw/store";
 import type { Scorecard, SideScore } from "@pfw/harness";
 import type { AdjustmentRecord, BankLine, LedgerEntry, ReconConfig, ReconItem, ReconReport } from "@pfw/recon";
 
 export type ScenarioResultView = Scorecard["scenarios"][number];
 
 export type { AdjustmentRecord, BankLine, LedgerEntry, ReconItem, ReconReport };
+export type { SpendLine, SpendOverview };
 export type { Approval, AuditEntry, Decision, DecisionRecord, DecisionSummary, Drift, Scorecard, SideScore };
 
 export interface Status {
@@ -190,6 +191,7 @@ export const api = {
   addPurchaseOrder: (po: { id: string; vendorId: string; amount: number; currency: string }, changedBy: string) =>
     post<{ ok: true }>("/api/registry/purchase-orders", { ...po, changedBy }),
   recon: () => request<ReconView>("/api/recon"),
+  spend: () => request<SpendOverview>("/api/spend"),
   reconImport: (lines: unknown, importedBy: string) => post<{ added: number; unchanged: number }>("/api/recon/bank-lines", { lines, importedBy }),
   reconRun: (runBy: string) => post<{ proposed: AdjustmentRecord[] }>("/api/recon/run", { runBy }),
   reconConfirm: (bankLineId: string, ledgerKey: string, resolvedBy: string, note: string) =>

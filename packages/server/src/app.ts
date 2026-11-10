@@ -16,7 +16,7 @@ import {
   type UnsupportedClause,
 } from "@pfw/core";
 import type { Firewall } from "@pfw/firewall";
-import { ApprovalStateError, PolicyConflictError, RegistryError, type Store } from "@pfw/store";
+import { ApprovalStateError, PolicyConflictError, RegistryError, type SpendLine, type Store } from "@pfw/store";
 import { ReconInputError, ReconStateError, ReconStore } from "@pfw/recon";
 import { LlmBudgetError, LlmRefusalError, type PolicyCompiler } from "@pfw/llm";
 import { z } from "zod";
@@ -368,6 +368,14 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.get<{ Querystring: { after?: string; limit?: string } }>("/api/audit", async (req) => ({
     entries: deps.runtime().store.audit.entries({ after: intParam(req.query.after, 0, 0, Number.MAX_SAFE_INTEGER), limit: intParam(req.query.limit, 200, 1, 1000) }),
   }));
+  app.get("/api/spend", async () => deps.runtime().store.spendOverview());
+  // A ledger for the books. Payee names come from untrusted invoices, so cells that a spreadsheet would run as a formula are defused.
+  app.get("/api/spend/export.csv", async (_req, reply) => {
+    reply.header("content-type", "text/csv; charset=utf-8");
+    reply.header("content-disposition", 'attachment; filename="spend-ledger.csv"');
+    return spendCsv(deps.runtime().store.spendLedger());
+  });
+
   // Everything needed to verify the log offline: `pnpm verify:audit <file>` checks it without trusting this server.
   app.get("/api/audit/export", async (_req, reply) => {
     reply.header("content-disposition", 'attachment; filename="audit-export.json"');
@@ -397,4 +405,17 @@ export function createApp(deps: AppDeps): FastifyInstance {
     });
   }
   return app;
+}
+
+const csvCell = (v: string | number | null): string => {
+  let t = v === null ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`;
+  return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+};
+
+/** Amounts are written in major units with two decimals; status and verdict are the firewall's own words, not the document's. */
+export function spendCsv(lines: SpendLine[]): string {
+  const head = ["date", "status", "verdict", "rule", "payee", "account", "vendor_id", "amount", "currency", "provider_status", "agent", "key"];
+  const rows = lines.map((l) => [l.createdAt, l.status, l.verdict, l.rule, l.payee, l.account, l.vendorId, (l.amount / 100).toFixed(2), l.currency, l.providerStatus, l.agentId, l.idempotencyKey]);
+  return `${[head, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n")}\r\n`;
 }

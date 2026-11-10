@@ -11,6 +11,7 @@ import { api, operatorToken, type Approval, type CompileResult, type PolicyView 
 import { Approvals } from "./screens/Approvals";
 import { PolicyEditor } from "./screens/PolicyEditor";
 import { RegistryScreen } from "./screens/Registry";
+import { Spend } from "./screens/Spend";
 
 type Reply = { status?: number; body?: unknown };
 type Route = Reply | ((init: RequestInit | undefined) => Reply);
@@ -713,5 +714,49 @@ describe("how a sent payment is described", () => {
     expect(sent("unclaimed")).toBe("Sent · unclaimed by recipient");
     expect(sent("returned")).toBe("Returned by recipient");
     expect(sent("failed")).toBe("Failed at PayPal");
+  });
+});
+
+describe("Spend", () => {
+  const line = (o: Record<string, unknown>) => ({ idempotencyKey: "k", createdAt: "2026-11-09T10:00:00.000Z", agentId: "a", payee: "Acme Supplies", account: "acct", vendorId: "acme", amount: 4500, currency: "USD", verdict: "allow", rule: "all_checks_passed", status: "paid", providerStatus: "success", ...o });
+  const overview = {
+    generatedAt: "2026-11-10T00:00:00.000Z",
+    totals: [
+      { currency: "USD", status: "paid", count: 2, amount: 9000 },
+      { currency: "USD", status: "held", count: 1, amount: 80000 },
+      { currency: "USD", status: "denied", count: 1, amount: 45000 },
+    ],
+    byDay: [{ day: "2026-11-09", currency: "USD", spent: 9000, held: 80000, blocked: 45000 }],
+    byVendor: [
+      { vendorId: "acme", name: "Acme Supplies", currency: "USD", payments: 2, spent: 9000, held: 80000, blocked: 0 },
+      { vendorId: null, name: "Evil Co", currency: "USD", payments: 0, spent: 0, held: 0, blocked: 45000 },
+    ],
+    moneyProtected: [{ currency: "USD", count: 1, amount: 45000 }],
+    openCommitments: [{ id: "po1", vendorId: "acme", amount: 4500, currency: "USD", status: "open", vendorName: "Acme Supplies" }],
+    needsAttention: [line({ idempotencyKey: "k9", status: "attention", providerStatus: "unclaimed" })],
+  };
+
+  test("shows totals, money protected, unregistered payees, open orders, attention rows and the CSV link", async () => {
+    mockApi({ "GET /api/spend": { body: overview } });
+    render(<Spend />);
+    expect(await screen.findByText("Spend in USD")).toBeTruthy();
+    expect(screen.getByText("Money protected · 1 blocked").previousSibling?.textContent).toBe("$450.00");
+    expect(screen.getByText("Waiting for approval · 1").previousSibling?.textContent).toBe("$800.00");
+    expect(screen.getByText(/Evil Co/)).toBeTruthy();
+    expect(screen.getByText(/not in registry/)).toBeTruthy();
+    expect(screen.getByText("po1")).toBeTruthy();
+    expect(screen.getByText(/Needs attention, PayPal unclaimed|Needs attention · PayPal unclaimed/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toBe("/api/spend/export.csv");
+  });
+  test("an empty ledger says so and still offers nothing misleading", async () => {
+    mockApi({ "GET /api/spend": { body: { ...overview, totals: [], byDay: [], byVendor: [], moneyProtected: [], openCommitments: [], needsAttention: [] } } });
+    render(<Spend />);
+    expect(await screen.findByText("No payments yet")).toBeTruthy();
+    expect(screen.getByText("Nothing outstanding.")).toBeTruthy();
+  });
+  test("an API failure is shown", async () => {
+    mockApi({ "GET /api/spend": { status: 500, body: { error: "boom" } } });
+    render(<Spend />);
+    expect(await screen.findByText(/boom/)).toBeTruthy();
   });
 });
