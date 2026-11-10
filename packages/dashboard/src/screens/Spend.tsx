@@ -44,7 +44,7 @@ const STATUS_WORD: Record<SpendLine["status"], string> = {
  * Read-only view of where money went. Everything here is a roll-up of decisions the firewall already made;
  * nothing on this screen can change a decision. Each currency is shown on its own and never added to another.
  */
-export function Spend() {
+export function Spend({ demo = false }: { demo?: boolean }) {
   const { data, error } = usePoll(api.spend, 5000);
   if (!data) return error ? <ErrorNote message={error} /> : <p className="muted">Loading…</p>;
   const currencies = [...new Set(data.totals.map((t) => t.currency))].sort();
@@ -62,6 +62,7 @@ export function Spend() {
         <CurrencySection key={c} currency={c} data={data} />
       ))}
       <Budgets data={data} />
+      {demo && <BudgetDemo />}
       <Card title={`Open purchase orders · ${data.openCommitments.length}`} aside="Approved to buy, not yet paid">
         {data.openCommitments.length === 0 ? (
           <p className="muted">Nothing outstanding.</p>
@@ -252,6 +253,52 @@ function Budgets({ data }: { data: SpendOverview }) {
         <button type="button" className="btn primary" disabled={busy} onClick={submit}>{busy ? "Saving…" : "Set budget"}</button>
       </div>
       {note && <p className={`result ${note.ok ? "ok" : "bad"}`} role="status">{note.text}</p>}
+    </Card>
+  );
+}
+
+/**
+ * Demo only: shows a budget holding a payment, live. Sets Acme's monthly budget below the invoice, then runs the ordinary
+ * "invoice matches the purchase order" scenario, which would normally be paid. The scenario list and scorecard are untouched.
+ */
+function BudgetDemo() {
+  const { data: registry } = usePoll(api.registry, 10_000);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string; held?: boolean } | null>(null);
+  const acme = registry?.vendors.find((v) => v.name === "Acme Supplies");
+
+  const run = async () => {
+    if (!acme) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      await api.setBudget(acme.id, 40_000, "demo");
+      const r = await api.runScenario("legit-po-match", "scripted");
+      const call = r.firewalled.calls[0];
+      const held = r.firewalled.pendingApprovals > 0;
+      setResult({ ok: true, held, text: held ? `Held for approval${call?.rule ? ` (${call.rule})` : ""}: ${call?.message ?? ""}` : `Not held: ${call?.message ?? "no call was made"}` });
+    } catch (e) {
+      setResult({ ok: false, text: e instanceof Error ? e.message : "The demo could not run." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title="Try a budget" aside="Demo mode">
+      <p className="muted">
+        Sets Acme Supplies' monthly budget to $400.00, then asks the agent to pay Acme's $450.00 invoice, a payment that is otherwise paid automatically.
+      </p>
+      {!acme && registry && <p className="muted">Acme Supplies is not in the registry, so this demo cannot run.</p>}
+      <div className="row">
+        <button type="button" className="btn primary" disabled={busy || !acme} onClick={() => void run()}>{busy ? "Running…" : "Set the budget and pay the invoice"}</button>
+      </div>
+      {result && (
+        <p className={`result ${result.ok ? "ok" : "bad"}`} role="status">
+          {result.text}{" "}
+          {result.held && <a href="#/approvals">Review it in Approvals</a>}
+        </p>
+      )}
     </Card>
   );
 }

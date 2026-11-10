@@ -61,6 +61,8 @@ Use demo mode (`pnpm dev:demo`, or the Render URL) and click through in this ord
 | 2:20 to 2:45 | Scorecard: the bars and the table. Point at the one scenario where the firewalled side still loses $800. | "Twenty attacks: the unprotected agent lost money in all of them. The firewall in one, bounded by a daily cap. Zero legitimate payments wrongly denied." |
 | 2:45 to 3:00 | The repo and the live URL | "Open source, running now." |
 
+Optional if time allows (swap it in for the policy row, or cut the approvals row shorter): **Spend** tab → *Try a budget* → *Set the budget and pay the invoice*. Acme's budget drops to $400.00, the $450.00 invoice that is normally paid automatically is held (`vendor_budget`), and the link goes to Approvals. Say: "A monthly budget does not block the payment, it asks a person."
+
 Rehearse once with a timer. The PayPal sandbox has been exercised live (Payouts, Invoicing, Orders, webhooks; see `docs/PAYPAL_ASSUMPTIONS.md`), so the video may say so for those; it may not claim a genuinely signed webhook delivery (that needs the public deploy) or the Slack input in a real workspace. Check the official rules on third-party trademarks and music before recording.
 
 ## Checklist status

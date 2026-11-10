@@ -107,7 +107,7 @@ export function App() {
         ) : route === "/approvals" ? (
           <Approvals open={go} onChange={refresh} />
         ) : route === "/spend" ? (
-          <Spend />
+          <Spend demo={Boolean(status?.demo)} />
         ) : route === "/recon" ? (
           <Recon onChange={refresh} />
         ) : route === "/registry" ? (

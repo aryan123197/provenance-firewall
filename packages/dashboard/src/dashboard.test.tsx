@@ -767,6 +767,35 @@ describe("Spend", () => {
     expect(post?.body).toEqual({ baseVersion: 3, patch: { vendorMonthlyBudgets: { acme: 200050 } }, confirmedBy: "dana@company.example" });
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
   });
+  test("the budget demo card is for demo mode only; it sets Acme's budget, runs the invoice and says it was held", async () => {
+    const acmeRegistry = { "GET /api/registry": { body: { vendors: [{ id: "acme", name: "Acme Supplies", account: "a", category: "office_supplies" }], purchaseOrders: [] } } };
+    const calls = mockApi({
+      "GET /api/spend": { body: overview },
+      ...acmeRegistry,
+      "GET /api/policy": { body: { policy: { version: 3 } } },
+      "POST /api/policy/activate": { body: { ok: true, version: 4 } },
+      "POST /api/demo/run": { body: { agent: "gullible", agentKind: "scripted", scenario: {}, baseline: { score: {}, calls: [], payouts: [] }, firewalled: { score: {}, calls: [{ key: "k", status: "needs_approval", rule: "vendor_budget", message: "past its monthly budget" }], payouts: [], pendingApprovals: 1 } } },
+    });
+    const { unmount } = render(<Spend />);
+    await screen.findByText("Spend in USD");
+    expect(screen.queryByText("Try a budget")).toBeNull();
+    unmount();
+
+    const user = userEvent.setup();
+    render(<Spend demo />);
+    await user.click(await screen.findByRole("button", { name: "Set the budget and pay the invoice" }));
+    expect(await screen.findByText(/Held for approval \(vendor_budget\): past its monthly budget/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Review it in Approvals" }).getAttribute("href")).toBe("#/approvals");
+    const posts = calls.filter((c) => c.method === "POST");
+    expect(posts[0]?.body).toMatchObject({ patch: { vendorMonthlyBudgets: { acme: 40000 } } });
+    expect(posts[1]?.body).toMatchObject({ scenarioId: "legit-po-match", agent: "scripted" });
+  });
+  test("the demo card explains itself when Acme is not in the registry", async () => {
+    mockApi({ "GET /api/spend": { body: overview }, "GET /api/registry": { body: { vendors: [], purchaseOrders: [] } } });
+    render(<Spend demo />);
+    expect(await screen.findByText(/Acme Supplies is not in the registry/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Set the budget and pay the invoice" }) as HTMLButtonElement).disabled).toBe(true);
+  });
   test("removing a budget sends null, and a refused change shows the server's reason", async () => {
     const calls = mockApi({
       "GET /api/spend": { body: overview },
