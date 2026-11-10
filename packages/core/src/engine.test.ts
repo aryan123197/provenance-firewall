@@ -37,6 +37,8 @@ const state = (o: Partial<PolicyState> = {}): PolicyState => ({
   vendorSpentToday: {},
   totalSpentToday: 0,
   paymentsLastHour: 0,
+  categorySpentThisMonth: {},
+  vendorHistory: {},
   ...o,
 });
 const run = (i: Overrides = {}, s: Partial<PolicyState> = {}) => evaluate(intent(i), policy, state(s));
@@ -200,6 +202,61 @@ describe("allowlist and velocity", () => {
   test("velocity: the sixth payment in an hour is denied", () => {
     expect(run({}, { paymentsLastHour: 4 }).verdict).toBe("allow");
     expect(run({}, { paymentsLastHour: 5 })).toMatchObject({ verdict: "deny", rule: "velocity" });
+  });
+});
+
+describe("category budgets", () => {
+  const budgeted = loadPolicy(
+    readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8").replace("categoryBudgets: {}", "categoryBudgets:\n  office_supplies: 100000"),
+  );
+  const go = (amount: number, spent: Record<string, number>) =>
+    evaluate(intent({ amount: f("user", amount) }), budgeted, state({ categorySpentThisMonth: spent, purchaseOrder: null }));
+  test("a payment that fits the monthly budget is allowed", () => {
+    expect(go(40_000, { office_supplies: 60_000 }).verdict).toBe("allow");
+  });
+  test("one cent over the budget is denied by the budget rule", () => {
+    expect(go(40_001, { office_supplies: 60_000 })).toMatchObject({ verdict: "deny", rule: "category_budget" });
+  });
+  test("other categories are not affected by this category's spend", () => {
+    expect(go(1000, { software: 999_999 }).verdict).toBe("allow");
+  });
+  test("a category called constructor does not read the object prototype", () => {
+    expect(go(1000, { constructor: 1 } as never).verdict).toBe("allow");
+  });
+  test("the budget follows the vendor's category on file, not the one the agent claims", () => {
+    const d = evaluate(intent({ amount: f("user", 40_001), category: f("literal", "software") }), budgeted, state({ categorySpentThisMonth: { office_supplies: 60_000 } }));
+    expect(d).toMatchObject({ verdict: "deny", rule: "category_budget" });
+  });
+  test("no budget set means no budget rule", () => {
+    expect(run({ amount: f("user", 40_000) }, { categorySpentThisMonth: { office_supplies: 10_000_000 } }).findings.map((x) => x.rule)).not.toContain("category_budget");
+  });
+});
+
+describe("anomaly hold", () => {
+  const watched = loadPolicy(
+    readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8") + "anomaly:\n  amountMultipleBps: 30000\n  minHistory: 3\n",
+  );
+  const go = (amount: number, history: { count: number; total: number } | undefined) =>
+    evaluate(intent({ amount: f("user", amount) }), watched, state({ vendorHistory: history ? { acme: history } : {}, purchaseOrder: null }));
+  test("exactly 3x the vendor's average is not unusual", () => {
+    expect(go(30_000, { count: 3, total: 30_000 }).verdict).toBe("allow");
+  });
+  test("one cent above 3x the average is held for a person, not denied", () => {
+    expect(go(30_001, { count: 3, total: 30_000 })).toMatchObject({ verdict: "require_approval", rule: "anomaly" });
+  });
+  test("too little history means no hold", () => {
+    expect(go(40_000, { count: 2, total: 2000 }).verdict).toBe("allow");
+    expect(go(40_000, undefined).verdict).toBe("allow");
+  });
+  test("it never turns a deny into an allow or approval", () => {
+    expect(go(100_001, { count: 3, total: 3000 }).verdict).toBe("deny");
+  });
+  test("not applied to a vendor that is not registered", () => {
+    const d = evaluate(intent({ payee: f("user", "New Vendor"), account: f("user", "a") }), watched, state({ vendorHistory: { acme: { count: 9, total: 9 } } }));
+    expect(d.findings.map((x) => x.rule)).not.toContain("anomaly");
+  });
+  test("is off when the policy has no anomaly block", () => {
+    expect(run({ amount: f("user", 49_000) }, { vendorHistory: { acme: { count: 9, total: 900 } } }).findings.map((x) => x.rule)).not.toContain("anomaly");
   });
 });
 

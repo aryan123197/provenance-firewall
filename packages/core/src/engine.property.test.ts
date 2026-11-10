@@ -61,6 +61,8 @@ const states = fc
       vendorSpentToday: { acme: r.vendorSpent, beta: r.vendorSpent, lucky: r.vendorSpent },
       totalSpentToday: r.totalSpent,
       paymentsLastHour: r.recent,
+      categorySpentThisMonth: {},
+      vendorHistory: {},
     }),
   );
 

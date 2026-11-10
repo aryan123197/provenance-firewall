@@ -18,3 +18,9 @@ velocity:
 categoryApprovalThresholds: {}
 # Optional. UTC weekdays (0 = Sunday ... 6 = Saturday) on which a new payee is denied outright.
 newPayeeDenyDays: []
+# Optional. Monthly (UTC calendar month) cap per vendor category, in cents. A payment that would pass it is denied.
+categoryBudgets: {}
+# Optional. Hold for approval when a payment is far above what that vendor has been paid before. Never allows or denies on its own.
+# anomaly:
+#   amountMultipleBps: 30000   # 3x the vendor's average past payment
+#   minHistory: 3              # past payments needed before the average counts

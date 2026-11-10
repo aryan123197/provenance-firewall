@@ -36,6 +36,10 @@ export function PolicyScreen() {
               {Object.entries(p.categoryApprovalThresholds).map(([cat, t]) => (
                 <Fragment key={cat}><dt>Approval needed above, {cat}</dt><dd>{money(t, p.currency)}</dd></Fragment>
               ))}
+              {Object.entries(p.categoryBudgets ?? {}).map(([cat, b]) => (
+                <Fragment key={`budget-${cat}`}><dt>Monthly budget, {cat}</dt><dd>{money(b, p.currency)}</dd></Fragment>
+              ))}
+              <dt>Unusual amounts</dt><dd>{p.anomaly ? `held for approval above ${p.anomaly.amountMultipleBps / 10_000}x the vendor's average (after ${p.anomaly.minHistory} payments)` : "not checked"}</dd>
               <dt>New payees denied on</dt><dd>{p.newPayeeDenyDays.length ? p.newPayeeDenyDays.map((d) => DAYS[d]).join(", ") : "no day (held for approval)"}</dd>
               <dt>Currency</dt><dd>{p.currency}</dd>
             </dl>
@@ -45,7 +49,7 @@ export function PolicyScreen() {
 
         <Card title="How a decision is made">
           <ol className="rules-list">
-            {(["payee_change", "untrusted_payee", "new_payee", "amount_mismatch", "approval_threshold", "hard_limit", "allowlist", "velocity"] as const).map((r) => (
+            {(["payee_change", "untrusted_payee", "new_payee", "amount_mismatch", "approval_threshold", "hard_limit", "category_budget", "allowlist", "velocity", "anomaly"] as const).map((r) => (
               <li key={r}>
                 <strong>{RULES[r]!.title}</strong>
                 <span>{RULES[r]!.what}</span>

@@ -17,6 +17,10 @@ export const PolicyPatchSchema = z
     /** Entries are merged into the existing map; `null` removes an override. */
     categoryApprovalThresholds: z.record(z.string().min(1), Minor.nullable()).optional(),
     newPayeeDenyDays: z.array(z.number().int().min(0).max(6)).optional(),
+    /** Monthly caps per vendor category. Entries are merged into the existing map; `null` removes a budget. */
+    categoryBudgets: z.record(z.string().min(1), Minor.nullable()).optional(),
+    /** `null` turns anomaly holds off. */
+    anomaly: PolicySchema.shape.anomaly.unwrap().nullable().optional(),
   })
   .strict();
 export type PolicyPatch = z.infer<typeof PolicyPatchSchema>;
@@ -34,6 +38,12 @@ export function applyPatch(active: PolicyDoc, patch: PolicyPatch): PolicyDoc {
     if (v === null) delete thresholds[cat];
     else thresholds[cat] = v;
   }
+  const budgets: Record<string, number> = { ...active.categoryBudgets };
+  for (const [cat, v] of Object.entries(p.categoryBudgets ?? {})) {
+    if (v === null) delete budgets[cat];
+    else budgets[cat] = v;
+  }
+  const anomaly = p.anomaly === undefined ? active.anomaly : (p.anomaly ?? undefined);
   const next = {
     name: active.name,
     version: active.version + 1,
@@ -45,6 +55,8 @@ export function applyPatch(active: PolicyDoc, patch: PolicyPatch): PolicyDoc {
     velocity: { ...active.velocity, ...stripUndefined(p.velocity ?? {}) },
     categoryApprovalThresholds: thresholds,
     newPayeeDenyDays: [...new Set(p.newPayeeDenyDays ?? active.newPayeeDenyDays)].sort((a, b) => a - b),
+    categoryBudgets: budgets,
+    ...(anomaly ? { anomaly } : {}),
   };
   return PolicySchema.parse(next);
 }
@@ -107,6 +119,32 @@ export function diffPolicy(a: PolicyDoc, b: PolicyDoc): PolicyChange[] {
     });
   }
 
+  for (const cat of new Set([...Object.keys(a.categoryBudgets), ...Object.keys(b.categoryBudgets)])) {
+    const x = a.categoryBudgets[cat];
+    const y = b.categoryBudgets[cat];
+    if (x === y) continue;
+    out.push({
+      path: `categoryBudgets.${cat}`,
+      label: `Monthly budget for ${cat}`,
+      before: x === undefined ? "none" : usd(x, a.currency),
+      after: y === undefined ? "none" : usd(y, b.currency),
+      direction: x === undefined ? "tighter" : y === undefined ? "looser" : y > x ? "looser" : "tighter",
+    });
+  }
+
+  const ax = a.anomaly;
+  const bx = b.anomaly;
+  if (ax?.amountMultipleBps !== bx?.amountMultipleBps || ax?.minHistory !== bx?.minHistory) {
+    const fmt = (v: PolicyDoc["anomaly"]) => (v ? `above ${v.amountMultipleBps / 10_000}x the vendor's average, after ${v.minHistory} payments` : "off");
+    out.push({
+      path: "anomaly",
+      label: "Hold for approval when the amount is unusual",
+      before: fmt(ax),
+      after: fmt(bx),
+      direction: !ax ? "tighter" : !bx ? "looser" : bx.amountMultipleBps < ax.amountMultipleBps ? "tighter" : bx.amountMultipleBps > ax.amountMultipleBps ? "looser" : "changed",
+    });
+  }
+
   const days = (d: number[]) => (d.length ? d.map((n) => DAYS[n]).join(", ") : "never");
   const sameDays = a.newPayeeDenyDays.join() === b.newPayeeDenyDays.join();
   if (!sameDays) {
@@ -129,6 +167,10 @@ export function lintPolicy(p: PolicyDoc): string[] {
   for (const [cat, t] of Object.entries(p.categoryApprovalThresholds)) {
     if (t > p.limits.perPayment) w.push(`The ${cat} approval threshold is above the per-payment cap, so approval can never apply to it.`);
     if (!p.allowedCategories.includes(cat)) w.push(`A threshold is set for ${cat}, but ${cat} is not an allowed category.`);
+  }
+  for (const [cat, b] of Object.entries(p.categoryBudgets)) {
+    if (!p.allowedCategories.includes(cat)) w.push(`A budget is set for ${cat}, but ${cat} is not an allowed category.`);
+    if (b < p.limits.perPayment) w.push(`The ${cat} budget is below the per-payment cap, so one allowed-size payment can exceed it and be denied.`);
   }
   if (p.limits.perPayment > p.limits.totalPerDay) w.push("The per-payment cap is above the daily total cap.");
   if (cap === 0) w.push("A limit of $0 blocks every payment.");

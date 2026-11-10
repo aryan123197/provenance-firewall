@@ -22,6 +22,21 @@ export const PolicySchema = z
     categoryApprovalThresholds: z.record(z.string().min(1), Minor).default({}),
     /** UTC weekdays (0 = Sunday ... 6 = Saturday) on which a new payee is denied outright instead of held for approval. */
     newPayeeDenyDays: z.array(z.number().int().min(0).max(6)).default([]),
+    /** Hard cap per vendor category on what is paid in one UTC calendar month. A payment that would pass it is denied. */
+    categoryBudgets: z.record(z.string().min(1), Minor).default({}),
+    /**
+     * Optional. Sends a payment to a person when its amount is far above what that vendor has been paid before.
+     * It can only add a hold for approval, never allow or deny on its own.
+     */
+    anomaly: z
+      .object({
+        /** Hold when amount > the vendor's average past payment times this, in basis points (30000 = 3x). */
+        amountMultipleBps: z.number().int().min(10_000).max(10_000_000),
+        /** Past payments to the vendor needed before the average means anything. */
+        minHistory: z.number().int().min(1).max(1000),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

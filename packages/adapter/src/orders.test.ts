@@ -31,6 +31,8 @@ const state = (): PolicyState => ({
   vendorSpentToday: {},
   totalSpentToday: 0,
   paymentsLastHour: 0,
+  categorySpentThisMonth: {},
+  vendorHistory: {},
 });
 const authority = new Authority("test-authority-key-0123456789");
 const allowed = (i = intent()): AllowedIntent => authority.mint(i, evaluate(i, POLICY, state()));

@@ -6,7 +6,7 @@ import { hashPolicy, type Policy, type PolicyDoc } from "./policy";
 
 export interface PolicyTestResult {
   id: string;
-  group: "thresholds" | "limits" | "new payees" | "allowlist" | "provenance (built in)";
+  group: "thresholds" | "limits" | "budgets" | "anomaly" | "new payees" | "allowlist" | "provenance (built in)";
   description: string;
   expected: string;
   actual: string;
@@ -35,6 +35,8 @@ const baseState = (vendors: VendorRecord[], now = at(2)): PolicyState => ({
   vendorSpentToday: {},
   totalSpentToday: 0,
   paymentsLastHour: 0,
+  categorySpentThisMonth: {},
+  vendorHistory: {},
 });
 
 /** An intent whose fields all come from trusted sources, so only the thresholds are being tested. */
@@ -63,9 +65,14 @@ export function generatePolicyTests(p: PolicyDoc): (Case & { policy: Policy })[]
   const outside: VendorRecord = { id: "v_outside", name: "Outside Co", account: "outside@vendors.example", category: "__not_allowed__" };
   const allVendors = [...vendors, outside];
 
+  const budgetOf = (category: string) => (Object.hasOwn(p.categoryBudgets, category) ? p.categoryBudgets[category] : undefined);
+  /** The most one clean payment can be before some cap, budget or approval threshold applies to this category. */
+  const ceiling = (category: string) =>
+    Math.min(p.limits.perPayment, p.limits.perVendorPerDay, p.limits.totalPerDay, budgetOf(category) ?? Number.POSITIVE_INFINITY, p.categoryApprovalThresholds[category] ?? p.approvalThreshold);
+
   // Independent expectation for a clean payment of `amount` from a vendor in `category`.
   const expectFor = (amount: number, category: string): Verdict => {
-    if (amount > p.limits.perPayment || amount > p.limits.perVendorPerDay || amount > p.limits.totalPerDay) return "deny";
+    if (amount > p.limits.perPayment || amount > p.limits.perVendorPerDay || amount > p.limits.totalPerDay || amount > (budgetOf(category) ?? Number.POSITIVE_INFINITY)) return "deny";
     const t = p.categoryApprovalThresholds[category] ?? p.approvalThreshold;
     return amount > t ? "require_approval" : "allow";
   };
@@ -97,7 +104,7 @@ export function generatePolicyTests(p: PolicyDoc): (Case & { policy: Policy })[]
     for (const [n, amt] of [["fits", 1], ["over", 2]] as const) {
       const fits = spent + amt <= cap;
       // The payment must trip nothing but the cap under test: it has to fit under the other two caps and the approval threshold too.
-      const withinOthers = amt <= Math.min(p.limits.perPayment, p.limits.perVendorPerDay, p.limits.totalPerDay, p.categoryApprovalThresholds[first.category] ?? p.approvalThreshold);
+      const withinOthers = amt <= ceiling(first.category);
       if (!withinOthers) continue;
       cases.push({
         id: `${id}-${n}`,
@@ -110,13 +117,49 @@ export function generatePolicyTests(p: PolicyDoc): (Case & { policy: Policy })[]
     }
   }
 
+  // Monthly category budgets: spend already at budget - 1 cent, then a 1 cent and a 2 cent payment.
+  for (const v of vendors) {
+    const budget = budgetOf(v.category);
+    if (budget === undefined) continue;
+    const spent = Math.max(budget - 1, 0);
+    for (const [n, amt] of [["fits", 1], ["over", 2]] as const) {
+      const fits = spent + amt <= budget;
+      // The payment must trip nothing but the budget: it has to fit under every other cap and the approval threshold too.
+      if (amt > Math.min(p.limits.perPayment, p.limits.perVendorPerDay, p.limits.totalPerDay, p.categoryApprovalThresholds[v.category] ?? p.approvalThreshold)) continue;
+      cases.push({
+        id: `budget-${v.category}-${n}`,
+        group: "budgets",
+        description: `With ${usd(spent)} already paid to ${v.category} this month, ${usd(amt)} ${fits ? "fits under" : "goes over"} its ${usd(budget)} budget`,
+        intent: trusted(v, amt, cur, `budget-${v.category}-${n}`),
+        state: { ...baseState(allVendors), categorySpentThisMonth: { [v.category]: spent } },
+        expect: fits ? { verdict: "allow" } : { verdict: "deny", rule: "category_budget" },
+      });
+    }
+  }
+
+  // Anomaly: a vendor whose past payments averaged $1.00; the amount that is exactly at the multiple is fine, one cent over is held.
+  if (p.anomaly) {
+    const { amountMultipleBps: bps, minHistory } = p.anomaly;
+    const edge = Math.floor(bps / 100);
+    const history = (count: number) => ({ ...baseState(allVendors), vendorHistory: { [first.id]: { count, total: count * 100 } } });
+    if (edge >= 1 && edge <= ceiling(first.category)) {
+      cases.push({ id: "anomaly-edge", group: "anomaly", description: `After ${minHistory} past payments averaging ${usd(100)}, ${usd(edge)} (${bps / 10_000}x the average) is not unusual`, intent: trusted(first, edge, cur, "anomaly-edge"), state: history(minHistory), expect: { verdict: "allow" } });
+    }
+    if (edge + 1 <= ceiling(first.category) && (edge + 1) * 10_000 > 100 * bps) {
+      cases.push({ id: "anomaly-over", group: "anomaly", description: `After ${minHistory} past payments averaging ${usd(100)}, ${usd(edge + 1)} is above ${bps / 10_000}x the average and is held for a person`, intent: trusted(first, edge + 1, cur, "anomaly-over"), state: history(minHistory), expect: { verdict: "require_approval", rule: "anomaly" } });
+      if (minHistory > 1) {
+        cases.push({ id: "anomaly-thin-history", group: "anomaly", description: `With only ${minHistory - 1} past payments there is no average to compare against, so ${usd(edge + 1)} is not held`, intent: trusted(first, edge + 1, cur, "anomaly-thin-history"), state: history(minHistory - 1), expect: { verdict: "allow" } });
+      }
+    }
+  }
+
   // Tolerance against a purchase order, using a base that stays under every threshold.
-  const baseAmt = Math.min(10_000, p.approvalThreshold, p.limits.perPayment, p.limits.perVendorPerDay, p.limits.totalPerDay);
+  const baseAmt = Math.min(10_000, p.approvalThreshold, p.limits.perPayment, p.limits.perVendorPerDay, p.limits.totalPerDay, budgetOf(first.category) ?? Number.POSITIVE_INFINITY);
   if (baseAmt >= 100) {
     const edge = baseAmt + Math.floor((baseAmt * p.amountToleranceBps) / 10_000);
     const po = { id: "po", vendorId: first.id, amount: baseAmt, currency: cur };
     const invoice = (amt: number, id: string): ResolvedIntent => ({ ...trusted(first, amt, cur, id), amount: f("invoice", amt) });
-    const withinCaps = (amt: number) => amt <= Math.min(p.limits.perPayment, p.limits.perVendorPerDay, p.limits.totalPerDay, p.categoryApprovalThresholds[first.category] ?? p.approvalThreshold);
+    const withinCaps = (amt: number) => amt <= ceiling(first.category);
     if (withinCaps(edge)) {
       cases.push({ id: "tolerance-edge", group: "thresholds", description: `An invoice of ${usd(edge)} against a ${usd(baseAmt)} purchase order is within the ${p.amountToleranceBps / 100}% tolerance`, intent: invoice(edge, "tolerance-edge"), state: { ...baseState(allVendors), purchaseOrder: po }, expect: { verdict: "allow" } });
     }
@@ -126,7 +169,7 @@ export function generatePolicyTests(p: PolicyDoc): (Case & { policy: Policy })[]
   }
 
   // An amount that trips no threshold or cap, so the rule under test is the only one that can fire.
-  const safeAmt = Math.min(100, p.limits.perPayment, p.limits.perVendorPerDay, p.limits.totalPerDay, p.categoryApprovalThresholds[first.category] ?? p.approvalThreshold);
+  const safeAmt = Math.min(100, ceiling(first.category));
 
   // New payees: held for approval, or denied on the configured weekdays.
   const newbie = (id: string): ResolvedIntent => ({

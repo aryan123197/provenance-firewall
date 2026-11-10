@@ -158,6 +158,31 @@ describe("counters", () => {
   });
 });
 
+describe("category budgets and anomaly holds", () => {
+  const withBlock = (extra: string) => loadPolicy(readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8").replace("categoryBudgets: {}", "") + extra);
+  const budgetPolicy = withBlock("categoryBudgets:\n  office_supplies: 10000\n");
+  const pay = (key: string, amount: number, p = budgetPolicy) => store.decide(intent({ idempotencyKey: key, amount: f("user", amount) }), p).decision;
+
+  test("the monthly budget is summed from payments to registered vendors and resets in a new month", () => {
+    expect(pay("b1", 6000).verdict).toBe("allow");
+    expect(pay("b2", 4000).verdict).toBe("allow");
+    expect(pay("b3", 1)).toMatchObject({ verdict: "deny", rule: "category_budget" });
+    now = new Date("2026-11-01T00:00:01.000Z");
+    expect(pay("b4", 1).verdict).toBe("allow");
+  });
+  test("a denied payment does not use up budget", () => {
+    expect(pay("c1", 10_001)).toMatchObject({ verdict: "deny" });
+    expect(pay("c2", 10_000).verdict).toBe("allow");
+  });
+  test("an unusually large payment is held for approval once the vendor has history", () => {
+    const watched = withBlock("anomaly:\n  amountMultipleBps: 30000\n  minHistory: 3\n");
+    for (const [k, a] of [["h1", 1000], ["h2", 1000], ["h3", 1000]] as const) expect(pay(k, a, watched).verdict).toBe("allow");
+    advance(2 * HOUR);
+    expect(pay("h4", 3000, watched).verdict).toBe("allow");
+    expect(pay("h5", 4501, watched)).toMatchObject({ verdict: "require_approval", rule: "anomaly" });
+  });
+});
+
 describe("purchase orders", () => {
   const inv = (k: string, amount: number) => intent({ idempotencyKey: k, amount: f("invoice", amount) });
   test("an invoice amount matching an open purchase order is allowed", () => {

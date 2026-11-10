@@ -17,6 +17,11 @@ const patch = fc.record(
     velocity: fc.record({ maxPerHour: fc.oneof(fc.integer({ min: -2, max: 100 }), fc.double()) }, { requiredKeys: [] }),
     categoryApprovalThresholds: fc.dictionary(category, fc.oneof(minor, fc.constant(null)), { maxKeys: 4 }),
     newPayeeDenyDays: fc.array(fc.integer({ min: -2, max: 9 }), { maxLength: 8 }),
+    categoryBudgets: fc.dictionary(category, fc.oneof(minor, fc.constant(null)), { maxKeys: 4 }),
+    anomaly: fc.oneof(
+      fc.constant(null),
+      fc.record({ amountMultipleBps: fc.oneof(fc.integer({ min: 9_990, max: 200_000 }), fc.double()), minHistory: fc.oneof(fc.integer({ min: 0, max: 20 }), fc.double()) }),
+    ),
   },
   { requiredKeys: [] },
 );

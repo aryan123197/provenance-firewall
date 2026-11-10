@@ -13,7 +13,9 @@ export type RuleId =
   | "approval_threshold"
   | "hard_limit"
   | "allowlist"
-  | "velocity";
+  | "velocity"
+  | "category_budget"
+  | "anomaly";
 
 export interface VendorRecord {
   id: string;
@@ -38,6 +40,10 @@ export interface PolicyState {
   vendorSpentToday: Readonly<Record<string, number>>;
   totalSpentToday: number;
   paymentsLastHour: number;
+  /** Minor units already paid this UTC month to registered vendors, keyed by vendor category. */
+  categorySpentThisMonth: Readonly<Record<string, number>>;
+  /** Past payments per vendor id: how many and their total in minor units. Excludes the payment being decided. */
+  vendorHistory: Readonly<Record<string, { count: number; total: number }>>;
 }
 
 export interface Finding {
@@ -65,6 +71,8 @@ const money = (minor: number, currency: string) => {
   const n = (minor / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return currency === "USD" ? `$${n}` : `${n} ${currency}`;
 };
+/** An own-property read, so a key like "constructor" never resolves to something on Object.prototype. */
+const own = <T>(o: Readonly<Record<string, T>>, k: string): T | undefined => (Object.hasOwn(o, k) ? o[k] : undefined);
 const norm = (s: string) => s.normalize("NFKC").trim().toLowerCase();
 
 /** Pure: the same intent, policy and state always give the same decision. No LLM, clock or I/O. */
@@ -145,12 +153,42 @@ export function evaluate(intent: ResolvedIntent, policy: Policy, state: PolicySt
     add("hard_limit", "deny", `This would take today's total past the ${money(policy.limits.totalPerDay, cur)} daily limit.`);
   }
 
+  // Budgets count only what was paid to registered vendors, so the category is the one on file, never a claimed one.
+  if (vendor) {
+    const budget = own(policy.categoryBudgets, vendor.category);
+    if (budget !== undefined) {
+      const spent = own(state.categorySpentThisMonth, vendor.category) ?? 0;
+      if (spent + amount.value > budget) {
+        add(
+          "category_budget",
+          "deny",
+          `This would take ${vendor.category} to ${money(spent + amount.value, cur)} this month, past its ${money(budget, cur)} budget.`,
+        );
+      }
+    }
+  }
+
   if (!policy.allowedCategories.includes(effectiveCategory)) {
     add("allowlist", "deny", `Category "${effectiveCategory}" is not on the allowlist.`);
   }
 
   if (state.paymentsLastHour + 1 > policy.velocity.maxPerHour) {
     add("velocity", "deny", `This agent already made ${state.paymentsLastHour} payments in the last hour (limit ${policy.velocity.maxPerHour}).`);
+  }
+
+  // Anomaly: only ever a hold. Compared in integers: amount > (total / count) * multiple.
+  if (vendor && policy.anomaly) {
+    const h = own(state.vendorHistory, vendor.id);
+    if (h && h.count >= policy.anomaly.minHistory && h.count > 0) {
+      if (BigInt(amount.value) * BigInt(h.count) * 10_000n > BigInt(h.total) * BigInt(policy.anomaly.amountMultipleBps)) {
+        const avg = Math.round(h.total / h.count);
+        add(
+          "anomaly",
+          "require_approval",
+          `${money(amount.value, cur)} is more than ${policy.anomaly.amountMultipleBps / 10_000}x what ${vendor.name} has been paid before (average ${money(avg, cur)} over ${h.count} payments).`,
+        );
+      }
+    }
   }
 
   const verdict: Verdict = findings.some((f) => f.verdict === "deny")

@@ -713,9 +713,22 @@ export class Store {
       .prepare("SELECT COUNT(*) AS n FROM payments WHERE agent_id = ? AND created_at > ?")
       .get(i.agentId, hourAgo) as { n: number };
 
+    const monthStart = `${iso.slice(0, 7)}-01T00:00:00.000Z`;
+    const perCategory = this.db
+      .prepare(
+        `SELECT v.category AS category, SUM(p.amount) AS total FROM payments p JOIN vendors v ON v.id = p.vendor_id
+         WHERE p.created_at >= ? GROUP BY v.category`,
+      )
+      .all(monthStart) as { category: string; total: number }[];
+    const history = this.db
+      .prepare("SELECT vendor_id, COUNT(*) AS n, SUM(amount) AS total FROM payments WHERE vendor_id IS NOT NULL GROUP BY vendor_id")
+      .all() as { vendor_id: string; n: number; total: number }[];
+
     return {
       now: iso,
       vendors: this.listVendors(),
+      categorySpentThisMonth: Object.fromEntries(perCategory.map((r) => [r.category, r.total])),
+      vendorHistory: Object.fromEntries(history.map((r) => [r.vendor_id, { count: r.n, total: r.total }])),
       purchaseOrder: this.purchaseOrderFor(i),
       vendorSpentToday: Object.fromEntries(perVendor.map((r) => [r.vendor_id, r.total])),
       totalSpentToday: totalToday.t,

@@ -21,6 +21,8 @@ export const RULES: Record<string, { title: string; what: string }> = {
   hard_limit: { title: "Hard limit exceeded", what: "The payment would exceed a per-payment, per-vendor or daily cap. Approval cannot override a cap." },
   allowlist: { title: "Category not allowed", what: "The vendor's category is not on the policy's allowlist." },
   velocity: { title: "Too many payments", what: "This agent has made too many payments in the last hour." },
+  category_budget: { title: "Category budget exceeded", what: "The payment would take the vendor's category past its monthly budget. Approval cannot override a budget." },
+  anomaly: { title: "Unusual amount", what: "The amount is far above what this vendor has been paid before, so a person confirms it. This only ever adds a hold." },
   currency: { title: "Unsupported currency", what: "The policy only covers one currency." },
 };
 export const ruleTitle = (r: string) => RULES[r]?.title ?? r;
