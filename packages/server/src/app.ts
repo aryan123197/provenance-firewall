@@ -318,7 +318,19 @@ export function createApp(deps: AppDeps): FastifyInstance {
     if (english.length > 4000) return reply.code(400).send({ error: "That policy text is too long (4,000 characters at most)." });
     const active = deps.runtime().policy();
     try {
-      const out = await deps.compiler.compile(english, active);
+      const vendors = deps.runtime().store.listVendors();
+      const compiled = await deps.compiler.compile(english, active, vendors.map((v) => ({ id: v.id, name: v.name })));
+      // A budget for an id that is not in the registry would never apply. Whatever the model returned, it is moved to "unsupported" here.
+      const known = new Set(vendors.map((v) => v.id));
+      const budgets = Object.entries(compiled.patch.vendorMonthlyBudgets ?? {});
+      const invented = budgets.filter(([id]) => !known.has(id)).map(([id]) => id);
+      const out = { ...compiled };
+      if (invented.length > 0) {
+        const kept = budgets.filter(([id]) => known.has(id));
+        const { vendorMonthlyBudgets: _dropped, ...rest } = compiled.patch;
+        out.patch = kept.length > 0 ? { ...rest, vendorMonthlyBudgets: Object.fromEntries(kept) } : rest;
+        out.unsupported = [...compiled.unsupported, ...invented.map((id) => ({ clause: `a monthly budget for "${id}"`, reason: `No registered vendor has the id "${id}", so the budget would never apply. Add the vendor to the registry first.` }))];
+      }
       return { baseVersion: active.version, english, summary: out.summary, patch: out.patch, unsupported: out.unsupported, examples: out.examples, ...review(active, out.patch, out.examples) };
     } catch (e) {
       if (e instanceof LlmBudgetError) return reply.code(429).send({ error: e.message });

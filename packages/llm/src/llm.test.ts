@@ -177,6 +177,28 @@ describe("AnthropicPolicyCompiler", () => {
     for (const banned of ["tool_choice", "temperature", "top_p", "top_k", "thinking"]) expect(req[banned]).toBeUndefined();
   });
 
+  test("budgets: the schema asks for them, the prompt lists the registry ids and the rule, and the patch carries them (null removes)", async () => {
+    const { client, requests } = fakeClient([reply({ ...specOutput, vendorBudgets: [{ vendorId: "acme", budgetMinor: 200_000 }, { vendorId: "beta", budgetMinor: null }] })]);
+    const out = await new AnthropicPolicyCompiler(client).compile("Acme gets $2,000 a month and Beta has no budget", base, [{ id: "acme", name: "Acme Supplies" }, { id: "beta", name: "Beta Software" }]);
+    expect(out.patch.vendorMonthlyBudgets).toEqual({ acme: 200_000, beta: null });
+    const req = requests[0]! as unknown as { output_config: { format: { schema: { required: string[]; properties: Record<string, unknown> } } }; system: string; messages: { content: string }[] };
+    expect(req.output_config.format.schema.required).toContain("vendorBudgets");
+    expect(req.output_config.format.schema.properties.vendorBudgets).toBeDefined();
+    expect(req.system).toContain("vendorBudgets");
+    expect(req.system).toContain("not denied");
+    expect(req.messages[0]!.content).toContain('{"id":"acme","name":"Acme Supplies"}');
+    expect(req.messages[0]!.content).toContain('"vendorMonthlyBudgets": {}');
+    const next = applyPatch(base, { vendorMonthlyBudgets: { acme: 200_000 } });
+    expect(runPolicyTests(next).every((t) => t.passed)).toBe(true);
+  });
+
+  test("budgets: a reply without the field (older replies, other callers) means no budget change, and a bad amount is rejected", () => {
+    expect(toCompilerOutput(specOutput).patch.vendorMonthlyBudgets).toBeUndefined();
+    expect(toCompilerOutput({ ...specOutput, vendorBudgets: [] }).patch.vendorMonthlyBudgets).toBeUndefined();
+    expect(() => toCompilerOutput({ ...specOutput, vendorBudgets: [{ vendorId: "acme", budgetMinor: -5 }] })).toThrow();
+    expect(() => toCompilerOutput({ ...specOutput, vendorBudgets: [{ vendorId: "acme", budgetMinor: 1.5 }] })).toThrow();
+  });
+
   test("unsupported clauses are passed through, not guessed", async () => {
     const out = toCompilerOutput({ ...specOutput, newPayeeDenyDays: null, categoryThresholds: [], approvalThreshold: null, unsupported: [{ clause: "never pay anything after 6pm", reason: "Policies have no time-of-day rule." }] });
     expect(out.patch).toEqual({});
