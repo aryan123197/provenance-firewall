@@ -5,6 +5,7 @@ import { Approvals } from "./screens/Approvals";
 import { PolicyScreen } from "./screens/Policy";
 import { RegistryScreen } from "./screens/Registry";
 import { Recon } from "./screens/Recon";
+import { Spend } from "./screens/Spend";
 import { Replay } from "./screens/Replay";
 import { usePoll, useHashRoute } from "./hooks";
 import { shortHash } from "./labels";
@@ -12,6 +13,7 @@ import { shortHash } from "./labels";
 const TABS = [
   { to: "/activity", label: "Live activity" },
   { to: "/approvals", label: "Approvals" },
+  { to: "/spend", label: "Spend" },
   { to: "/recon", label: "Close" },
   { to: "/registry", label: "Registry" },
   { to: "/policy", label: "Policy & scorecard" },
@@ -104,6 +106,8 @@ export function App() {
           <Replay id={decodeURIComponent(decisionMatch[1]!)} back={() => go("/activity")} open={go} />
         ) : route === "/approvals" ? (
           <Approvals open={go} onChange={refresh} />
+        ) : route === "/spend" ? (
+          <Spend demo={Boolean(status?.demo)} />
         ) : route === "/recon" ? (
           <Recon onChange={refresh} />
         ) : route === "/registry" ? (

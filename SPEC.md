@@ -72,6 +72,7 @@ A field takes the lowest trust level of anything that contributed to it.
 | Amount mismatch | Invoice amount (T3) differs from the purchase order by more than the set tolerance | Require approval |
 | Approval threshold | Amount above the configured limit | Require approval |
 | Hard limits | Per-payment, per-vendor-per-day, or total-per-day cap exceeded | Deny |
+| Vendor monthly budget | A registered vendor's spend this UTC month plus this payment exceeds its budget in the policy (opt-in, none by default) | Require approval, never deny |
 | Allowlist | Merchant or category not on the allowlist | Deny |
 | Velocity | More than N payments per hour from one agent | Deny |
 | Replay | Same idempotency key seen before | Return the prior decision, never charge twice |

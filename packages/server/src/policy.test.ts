@@ -22,7 +22,7 @@ const SPEC_OUTPUT: CompilerOutput = {
 
 let server: Server;
 let output: CompilerOutput;
-let calls: { english: string; active: PolicyDoc }[];
+let calls: { english: string; active: PolicyDoc; vendors?: readonly { id: string; name: string }[] }[];
 
 const build = (extra: Partial<Parameters<typeof buildServer>[0]> = {}, withCompiler = true) =>
   buildServer({
@@ -40,8 +40,8 @@ const build = (extra: Partial<Parameters<typeof buildServer>[0]> = {}, withCompi
     trustProxy: false,
     demo: false,
     llm: null,
-    ...(withCompiler ? { compiler: { compile: async (english, active) => {
-          calls.push({ english, active });
+    ...(withCompiler ? { compiler: { compile: async (english, active, vendors) => {
+          calls.push({ english, active, ...(vendors ? { vendors } : {}) });
           return output;
         } } satisfies PolicyCompiler } : {}),
     ...extra,
@@ -133,6 +133,43 @@ describe("activate", () => {
     const audit = (await server.app.inject({ url: "/api/audit" })).json() as { entries: { type: string; payload: { confirmedBy?: string; sourceText?: string } }[] };
     expect(audit.entries.find((e) => e.type === "policy_activated")?.payload).toMatchObject({ confirmedBy: "dana@company.example" });
     expect((await server.app.inject({ url: "/api/audit/verify" })).json()).toMatchObject({ ok: true });
+  });
+  test("a budget for a registered vendor activates and is reported; one for an unknown id is refused", async () => {
+    const vendor = "acme";
+    const added = await server.app.inject({ method: "POST", url: "/api/registry/vendors", headers: op, payload: { id: vendor, name: "Acme Supplies", account: "acme@sandbox.example", category: "office_supplies", changedBy: "dana@company.example" } });
+    expect(added.statusCode).toBe(200);
+    const unknown = await activate({ baseVersion: 1, patch: { vendorMonthlyBudgets: { nobody: 1000 } }, confirmedBy: "dana@company.example" });
+    expect(unknown.statusCode).toBe(400);
+    expect(unknown.json().error).toContain("nobody");
+    const ok = await activate({ baseVersion: 1, patch: { vendorMonthlyBudgets: { [vendor]: 20_000 } }, confirmedBy: "dana@company.example" });
+    expect(ok.statusCode).toBe(200);
+    const view = (await server.app.inject({ url: "/api/policy" })).json() as { policy: { vendorMonthlyBudgets: Record<string, number> } };
+    expect(view.policy.vendorMonthlyBudgets).toEqual({ [vendor]: 20_000 });
+    const spend = (await server.app.inject({ url: "/api/spend" })).json() as { budgets: { vendorId: string; budget: number }[] };
+    expect(spend.budgets).toMatchObject([{ vendorId: vendor, budget: 20_000 }]);
+  });
+  test("English budgets: the compiler is shown the registry, a registered vendor's budget compiles and activates, an invented id becomes an unsupported clause", async () => {
+    await server.app.inject({ method: "POST", url: "/api/registry/vendors", headers: op, payload: { id: "acme", name: "Acme Supplies", account: "acme@sandbox.example", category: "office_supplies", changedBy: "dana@company.example" } });
+    output = { ...SPEC_OUTPUT, summary: "Acme gets $400 a month.", examples: [], patch: { vendorMonthlyBudgets: { acme: 40_000, ghostco: 99_900 } } };
+    const { status, body } = await compile("Acme gets $400 a month, and Ghostco $999");
+    expect(status).toBe(200);
+    expect(calls.at(-1)?.vendors).toEqual([{ id: "acme", name: "Acme Supplies" }]);
+    expect(body.patch).toEqual({ vendorMonthlyBudgets: { acme: 40_000 } });
+    expect(body.unsupported).toHaveLength(1);
+    expect(body.unsupported[0].clause).toContain("ghostco");
+    expect(body.diff.map((c: { path: string; direction: string }) => [c.path, c.direction])).toContainEqual(["vendorMonthlyBudgets.acme", "tighter"]);
+    expect(body.tests.some((t: { group: string }) => t.group === "budgets")).toBe(true);
+    expect(body.canActivate).toBe(true);
+    const r = await activate({ baseVersion: body.baseVersion, patch: body.patch, english: body.english, examples: body.examples, unsupported: body.unsupported, acknowledgeUnsupported: true, confirmedBy: "dana@company.example" });
+    expect(r.statusCode).toBe(200);
+    const view = (await server.app.inject({ url: "/api/policy" })).json() as { policy: { vendorMonthlyBudgets: Record<string, number> } };
+    expect(view.policy.vendorMonthlyBudgets).toEqual({ acme: 40_000 });
+  });
+  test("English budgets: with only invented ids the patch has no budget at all", async () => {
+    output = { ...SPEC_OUTPUT, examples: [], patch: { vendorMonthlyBudgets: { ghostco: 1000 } } };
+    const { body } = await compile("Ghostco gets $10 a month");
+    expect(body.patch).toEqual({});
+    expect(body.unsupported[0].reason).toContain("Add the vendor to the registry first");
   });
   test("failing tests block activation even if the browser claims otherwise", async () => {
     output = { ...SPEC_OUTPUT, patch: { categoryApprovalThresholds: { contractors: 500 } } };

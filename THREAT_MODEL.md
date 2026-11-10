@@ -40,6 +40,7 @@ A payee, account or amount that originated in untrusted content can never author
 | 13 | **Tampering with history** | The audit log is append-only in SQL and hash-chained with an Ed25519 signature per entry. Edits, insertions and mid-log deletions fail verification, even if the SQL triggers are dropped. | `store/audit` | `audit.test.ts` |
 | 14 | **Policy edits that weaken security** | The policy schema has no setting for the provenance rules, so no policy can loosen them. Unknown keys are rejected. | `core/policy` | `engine.test.ts` |
 | 15 | **A bad or manipulated plain-English policy** (misread units, injected instructions in the text, a clause quietly dropped) | The compiler returns only a patch validated against a strict schema, so there is nothing to carry a provenance setting. Unsupported clauses are listed and must be acknowledged. The server recomputes the diff, lint warnings and tests itself and refuses activation if any test fails, including the author's own examples, which catch slips such as dollars compiled as cents. Activation needs the operator token, a named confirmer and the current base version, and records the English, the patch and who confirmed in the audit log. | `core/policy-edit`, `core/policy-tests`, `server` | `policy-edit.test.ts`, `policy.test.ts` (server), `llm.test.ts` |
+| 16 | **Slow drain of one vendor** across many days, under every daily cap | An optional monthly budget per registered vendor: a payment that would take the vendor's spend this UTC month past its budget is held for a person, not denied, so legitimate work continues while the pattern gets a human look. It can only make a verdict stricter, and only up to needs-approval; a hard cap or a deny still wins. Setting or removing one is a normal policy change: the generated tests must pass and it is attributed and audited. The plain-English compiler is shown the registry's ids, and a budget for an id that is not registered is reported as unsupported rather than guessed. | `engine` (`vendor_budget`), `store.stateFor`, `policy-edit` | `engine.property.test.ts` ("a budget can only make a verdict stricter"), `engine.test.ts`, `store.test.ts`, `policy.test.ts` |
 
 The engine's safety claims are also checked as properties over tens of thousands of random intents (`engine.property.test.ts`), stated independently of the rule code: allow implies an exact registry match; a payee swap is always denied with an alert; an untrusted amount is allowed only against a matching order; every limit holds on allow; lowering trust never improves a verdict.
 
@@ -64,11 +65,24 @@ Settlement lines are a second place untrusted text enters: a memo, a reference o
 
 Not covered: the real shape of PayPal's settlement report (see the README status table), refunds, returns and chargebacks (these have negative or reversing amounts, which the importer rejects today, so they must be handled outside this tool), multi-currency conversion, and an operator who confirms a wrong match on purpose (it is attributed and audited, not prevented).
 
+## Spend views, CSV and report
+
+The Spend tab, the CSV ledger, the daily digest (including its Slack command) and the printable report summarize decisions already made and change none. They are another place untrusted text is written out, because payee names and reasons come from invoices.
+
+| Attack | Mitigation |
+| --- | --- |
+| A payee name such as `=HYPERLINK(...)` runs as a formula when the CSV is opened in a spreadsheet | Cells that start with `=`, `+`, `-`, `@`, a tab or a carriage return are prefixed so they are read as text. Tested with a hostile name. |
+| A payee name injects markup, a link or a script into the HTML or Markdown report | Every cell is escaped for HTML and for Markdown (and newlines are flattened so a name cannot break a table row), and the HTML report is served with a content-security-policy that allows no script. Tested with a hostile name. |
+| The report or digest overstates safety | The report states whether the signed audit log verifies and says plainly when it does not; money in different currencies is never added together; "money protected" counts only denied or rejected payments. |
+
+Not covered: these routes are open reads, like the rest of the dashboard's GET routes, so on a public demo anyone can read the totals (the demo's money is simulated or sandbox).
+
 ## Known limitations and non-goals
 
 - **Registry compromise.** If an attacker can edit the vendor registry, they can register themselves. Registry edits are operator-token-only, validated, attributed to a named person and written to the signed audit log with before and after values; changing where an existing vendor is paid is flagged in the audit entry and needs an explicit confirmation in the dashboard. That makes a malicious change visible, not impossible: a stolen operator token still edits the registry. Keep the token out of the agent's reach.
 - **Approval fatigue and social engineering of the operator.** The firewall shows the evidence and provenance and refuses to let approvals override hard limits, but a person who approves everything defeats the "needs approval" layer. The harness does not model a careless approver.
 - **Bounded, not zero, loss under a compromised agent with real purchase orders.** In the `burst-extra-pos` scenario an agent pays two real orders that were not requested before the daily cap stops it ($800 in the committed run). Caps bound the damage; they do not prevent it.
+- **Budgets are opt-in and soft.** The default policy sets none, a budget applies only to a registered vendor (by id) and a UTC calendar month, and going past one asks a person rather than blocking, so a careless approver can still release the payment.
 - **Amount tolerance.** A T3 amount within the tolerance of a real order is paid as invoiced (the default is 5%).
 - **Truncation of the audit log** is detectable only against a head hash recorded elsewhere. `AuditLog.verify(expectedHead)` supports this; `GET /api/status` returns the current head, but nothing publishes it externally yet.
 - **The status check verifies incrementally.** `GET /api/status` (polled by the dashboard) checks only the audit entries added since its last check, plus the last entry it had verified, because a full pass costs about 150 ms per thousand entries and a public demo grows without bound. An edit to an older, already-checked row is found by the full pass (`GET /api/audit/verify`, the export, or `pnpm verify:audit`), not by the status banner; a full pass also resets the status check's baseline.

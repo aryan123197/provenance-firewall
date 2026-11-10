@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { OperatorSignIn } from "./App";
-import { activityColumns } from "./screens/Activity";
+import { TodayStrip, activityColumns } from "./screens/Activity";
 import { scorecardColumns } from "./screens/Policy";
 import { useNarrow } from "./hooks";
 import { outcome } from "./labels";
@@ -11,6 +11,7 @@ import { api, operatorToken, type Approval, type CompileResult, type PolicyView 
 import { Approvals } from "./screens/Approvals";
 import { PolicyEditor } from "./screens/PolicyEditor";
 import { RegistryScreen } from "./screens/Registry";
+import { Spend } from "./screens/Spend";
 
 type Reply = { status?: number; body?: unknown };
 type Route = Reply | ((init: RequestInit | undefined) => Reply);
@@ -713,5 +714,158 @@ describe("how a sent payment is described", () => {
     expect(sent("unclaimed")).toBe("Sent · unclaimed by recipient");
     expect(sent("returned")).toBe("Returned by recipient");
     expect(sent("failed")).toBe("Failed at PayPal");
+  });
+});
+
+describe("Spend", () => {
+  const line = (o: Record<string, unknown>) => ({ idempotencyKey: "k", createdAt: "2026-11-09T10:00:00.000Z", agentId: "a", payee: "Acme Supplies", account: "acct", vendorId: "acme", amount: 4500, currency: "USD", verdict: "allow", rule: "all_checks_passed", status: "paid", providerStatus: "success", ...o });
+  const overview = {
+    generatedAt: "2026-11-10T00:00:00.000Z",
+    totals: [
+      { currency: "USD", status: "paid", count: 2, amount: 9000 },
+      { currency: "USD", status: "held", count: 1, amount: 80000 },
+      { currency: "USD", status: "denied", count: 1, amount: 45000 },
+    ],
+    byDay: [{ day: "2026-11-09", currency: "USD", spent: 9000, held: 80000, blocked: 45000 }],
+    byVendor: [
+      { vendorId: "acme", name: "Acme Supplies", currency: "USD", payments: 2, spent: 9000, held: 80000, blocked: 0 },
+      { vendorId: null, name: "Evil Co", currency: "USD", payments: 0, spent: 0, held: 0, blocked: 45000 },
+    ],
+    moneyProtected: [{ currency: "USD", count: 1, amount: 45000 }],
+    openCommitments: [{ id: "po1", vendorId: "acme", amount: 4500, currency: "USD", status: "open", vendorName: "Acme Supplies" }],
+    needsAttention: [line({ idempotencyKey: "k9", status: "attention", providerStatus: "unclaimed" })],
+    budgets: [{ vendorId: "acme", name: "Acme Supplies", budget: 10000, spent: 12000 }],
+  };
+
+  const registry = { "GET /api/registry": { body: { vendors: [{ id: "acme", name: "Acme Supplies", account: "a", category: "office_supplies" }], purchaseOrders: [] } } };
+
+  test("setting a budget sends a one-field policy patch with the person's name; bad input sends nothing", async () => {
+    const calls = mockApi({
+      "GET /api/spend": { body: { ...overview, budgets: [] } },
+      ...registry,
+      "GET /api/policy": { body: { policy: { version: 3 } } },
+      "POST /api/policy/activate": { body: { ok: true, version: 4 } },
+    });
+    const user = userEvent.setup();
+    render(<Spend />);
+    await screen.findByText("Spend in USD");
+    expect(screen.getByText(/No budgets set/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Set budget" }));
+    expect(await screen.findByText("Choose a vendor.")).toBeTruthy();
+    await user.selectOptions(await screen.findByLabelText("Vendor"), "acme");
+    await user.type(screen.getByLabelText(/Budget per month/), "abc");
+    await user.click(screen.getByRole("button", { name: "Set budget" }));
+    expect(await screen.findByText(/Enter the monthly budget in dollars/)).toBeTruthy();
+    await user.clear(screen.getByLabelText(/Budget per month/));
+    await user.type(screen.getByLabelText(/Budget per month/), "2000.50");
+    await user.click(screen.getByRole("button", { name: "Set budget" }));
+    expect(await screen.findByText(/Enter your name/)).toBeTruthy();
+    await user.type(screen.getByLabelText("Your name"), "dana@company.example");
+    await user.click(screen.getByRole("button", { name: "Set budget" }));
+    expect(await screen.findByText(/Budget set for acme \(policy v4\)/)).toBeTruthy();
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.body).toEqual({ baseVersion: 3, patch: { vendorMonthlyBudgets: { acme: 200050 } }, confirmedBy: "dana@company.example" });
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
+  });
+  test("the budget demo card is for demo mode only; it sets Acme's budget, runs the invoice and says it was held", async () => {
+    const acmeRegistry = { "GET /api/registry": { body: { vendors: [{ id: "acme", name: "Acme Supplies", account: "a", category: "office_supplies" }], purchaseOrders: [] } } };
+    const calls = mockApi({
+      "GET /api/spend": { body: overview },
+      ...acmeRegistry,
+      "GET /api/policy": { body: { policy: { version: 3 } } },
+      "POST /api/policy/activate": { body: { ok: true, version: 4 } },
+      "POST /api/demo/run": { body: { agent: "gullible", agentKind: "scripted", scenario: {}, baseline: { score: {}, calls: [], payouts: [] }, firewalled: { score: {}, calls: [{ key: "k", status: "needs_approval", rule: "vendor_budget", message: "past its monthly budget" }], payouts: [], pendingApprovals: 1 } } },
+    });
+    const { unmount } = render(<Spend />);
+    await screen.findByText("Spend in USD");
+    expect(screen.queryByText("Try a budget")).toBeNull();
+    unmount();
+
+    const user = userEvent.setup();
+    render(<Spend demo />);
+    await user.click(await screen.findByRole("button", { name: "Set the budget and pay the invoice" }));
+    expect(await screen.findByText(/Held for approval \(vendor_budget\): past its monthly budget/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Review it in Approvals" }).getAttribute("href")).toBe("#/approvals");
+    const posts = calls.filter((c) => c.method === "POST");
+    expect(posts[0]?.body).toMatchObject({ patch: { vendorMonthlyBudgets: { acme: 40000 } } });
+    expect(posts[1]?.body).toMatchObject({ scenarioId: "legit-po-match", agent: "scripted" });
+  });
+  test("the demo card explains itself when Acme is not in the registry", async () => {
+    mockApi({ "GET /api/spend": { body: overview }, "GET /api/registry": { body: { vendors: [], purchaseOrders: [] } } });
+    render(<Spend demo />);
+    expect(await screen.findByText(/Acme Supplies is not in the registry/)).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Set the budget and pay the invoice" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+  test("removing a budget sends null, and a refused change shows the server's reason", async () => {
+    const calls = mockApi({
+      "GET /api/spend": { body: overview },
+      ...registry,
+      "GET /api/policy": { body: { policy: { version: 3 } } },
+      "POST /api/policy/activate": { status: 409, body: { error: "policy changed, reload" } },
+    });
+    localStorage.setItem("pfw.approver", "dana@company.example");
+    const user = userEvent.setup();
+    render(<Spend />);
+    await user.click(await screen.findByRole("button", { name: "Remove the budget for Acme Supplies" }));
+    expect(await screen.findByText(/policy changed, reload/)).toBeTruthy();
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ patch: { vendorMonthlyBudgets: { acme: null } } });
+  });
+
+  test("shows totals, money protected, unregistered payees, open orders, attention rows and the CSV link", async () => {
+    mockApi({ "GET /api/spend": { body: overview }, ...registry });
+    render(<Spend />);
+    expect(await screen.findByText("Spend in USD")).toBeTruthy();
+    expect(screen.getByText("Money protected · 1 blocked").previousSibling?.textContent).toBe("$450.00");
+    expect(screen.getByText("Waiting for approval · 1").previousSibling?.textContent).toBe("$800.00");
+    expect(screen.getByText(/Evil Co/)).toBeTruthy();
+    expect(screen.getByText(/not in registry/)).toBeTruthy();
+    expect(screen.getByText("po1")).toBeTruthy();
+    expect(screen.getByText(/Needs attention, PayPal unclaimed|Needs attention · PayPal unclaimed/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toBe("/api/spend/export.csv");
+    expect(screen.getByRole("link", { name: "Open the printable report" }).getAttribute("href")).toBe("/api/report");
+    expect(screen.getByRole("link", { name: "Download the report as Markdown" }).getAttribute("href")).toBe("/api/report.md");
+    expect(screen.getByText("$120.00 of $100.00 · over")).toBeTruthy();
+  });
+  test("an empty ledger says so and still offers nothing misleading", async () => {
+    mockApi({ ...registry, "GET /api/spend": { body: { ...overview, totals: [], byDay: [], byVendor: [], moneyProtected: [], openCommitments: [], needsAttention: [], budgets: [] } } });
+    render(<Spend />);
+    expect(await screen.findByText("No payments yet")).toBeTruthy();
+    expect(screen.getByText("Nothing outstanding.")).toBeTruthy();
+  });
+  test("an API failure is shown", async () => {
+    mockApi({ ...registry, "GET /api/spend": { status: 500, body: { error: "boom" } } });
+    render(<Spend />);
+    expect(await screen.findByText(/boom/)).toBeTruthy();
+  });
+});
+
+describe("TodayStrip", () => {
+  const digest = (o: Record<string, unknown>) => ({ generatedAt: "2026-11-10T12:00:00.000Z", day: "2026-11-10", today: [], pendingApprovals: { count: 0, oldestRequestedAt: null }, attention: 0, budgets: [], needsAttention: false, ...o });
+  test("is hidden when nothing needs a person", async () => {
+    const calls = mockApi({ "GET /api/digest": { body: digest({}) } });
+    const { container } = render(<TodayStrip />);
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    expect(container.textContent).toBe("");
+  });
+  test("lists held payments, unconfirmed payouts and only budgets that are near or over", async () => {
+    mockApi({
+      "GET /api/digest": {
+        body: digest({
+          needsAttention: true,
+          pendingApprovals: { count: 2, oldestRequestedAt: "2026-11-10T09:00:00.000Z" },
+          attention: 1,
+          budgets: [
+            { vendorId: "a", name: "Acme Supplies", budget: 40000, spent: 45000, percent: 113, state: "over" },
+            { vendorId: "c", name: "Calm Co", budget: 100000, spent: 1000, percent: 1, state: "ok" },
+          ],
+        }),
+      },
+    });
+    render(<TodayStrip />);
+    expect(await screen.findByText("2 payments are waiting for approval")).toBeTruthy();
+    expect(screen.getByText("1 sent payout has not arrived as paid")).toBeTruthy();
+    expect(screen.getByText("Acme Supplies is over its monthly budget (113%)")).toBeTruthy();
+    expect(screen.queryByText(/Calm Co/)).toBeNull();
+    expect(screen.getByRole("link", { name: "Approvals" }).getAttribute("href")).toBe("#/approvals");
   });
 });

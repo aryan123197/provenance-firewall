@@ -22,6 +22,11 @@ export const PolicySchema = z
     categoryApprovalThresholds: z.record(z.string().min(1), Minor).default({}),
     /** UTC weekdays (0 = Sunday ... 6 = Saturday) on which a new payee is denied outright instead of held for approval. */
     newPayeeDenyDays: z.array(z.number().int().min(0).max(6)).default([]),
+    /**
+     * Optional monthly budget per vendor id (UTC calendar month, minor units). Spending past it needs a person; it is not a hard cap.
+     * Left out of a policy that has none, so adding the field changed no existing policy's hash.
+     */
+    vendorMonthlyBudgets: z.record(z.string().min(1), Minor).optional(),
   })
   .strict();
 

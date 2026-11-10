@@ -16,7 +16,8 @@ import {
   type UnsupportedClause,
 } from "@pfw/core";
 import type { Firewall } from "@pfw/firewall";
-import { ApprovalStateError, PolicyConflictError, RegistryError, type Store } from "@pfw/store";
+import { renderReport, type ReportData } from "./report";
+import { ApprovalStateError, PolicyConflictError, RegistryError, type SpendLine, type Store } from "@pfw/store";
 import { ReconInputError, ReconStateError, ReconStore } from "@pfw/recon";
 import { LlmBudgetError, LlmRefusalError, type PolicyCompiler } from "@pfw/llm";
 import { z } from "zod";
@@ -317,7 +318,19 @@ export function createApp(deps: AppDeps): FastifyInstance {
     if (english.length > 4000) return reply.code(400).send({ error: "That policy text is too long (4,000 characters at most)." });
     const active = deps.runtime().policy();
     try {
-      const out = await deps.compiler.compile(english, active);
+      const vendors = deps.runtime().store.listVendors();
+      const compiled = await deps.compiler.compile(english, active, vendors.map((v) => ({ id: v.id, name: v.name })));
+      // A budget for an id that is not in the registry would never apply. Whatever the model returned, it is moved to "unsupported" here.
+      const known = new Set(vendors.map((v) => v.id));
+      const budgets = Object.entries(compiled.patch.vendorMonthlyBudgets ?? {});
+      const invented = budgets.filter(([id]) => !known.has(id)).map(([id]) => id);
+      const out = { ...compiled };
+      if (invented.length > 0) {
+        const kept = budgets.filter(([id]) => known.has(id));
+        const { vendorMonthlyBudgets: _dropped, ...rest } = compiled.patch;
+        out.patch = kept.length > 0 ? { ...rest, vendorMonthlyBudgets: Object.fromEntries(kept) } : rest;
+        out.unsupported = [...compiled.unsupported, ...invented.map((id) => ({ clause: `a monthly budget for "${id}"`, reason: `No registered vendor has the id "${id}", so the budget would never apply. Add the vendor to the registry first.` }))];
+      }
       return { baseVersion: active.version, english, summary: out.summary, patch: out.patch, unsupported: out.unsupported, examples: out.examples, ...review(active, out.patch, out.examples) };
     } catch (e) {
       if (e instanceof LlmBudgetError) return reply.code(429).send({ error: e.message });
@@ -343,6 +356,10 @@ export function createApp(deps: AppDeps): FastifyInstance {
     let result: ReturnType<typeof review>;
     try {
       examples = examplesSchema.parse(b.examples ?? []);
+      // A budget for an id that is not in the registry would never apply, so setting one is refused rather than silently ignored.
+      const known = new Set(store.listVendors().map((v) => v.id));
+      const unknown = Object.entries(PolicyPatchSchema.parse(b.patch ?? {}).vendorMonthlyBudgets ?? {}).filter(([id, v]) => v !== null && !known.has(id)).map(([id]) => id);
+      if (unknown.length > 0) return reply.code(400).send({ error: `No registered vendor has the id ${unknown.join(", ")}, so a budget for it would never apply.` });
       result = review(active, b.patch ?? {}, examples);
     } catch (e) {
       return reply.code(400).send({ error: e instanceof Error ? `That change is not a valid policy: ${e.message}` : "invalid policy change" });
@@ -368,6 +385,57 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.get<{ Querystring: { after?: string; limit?: string } }>("/api/audit", async (req) => ({
     entries: deps.runtime().store.audit.entries({ after: intParam(req.query.after, 0, 0, Number.MAX_SAFE_INTEGER), limit: intParam(req.query.limit, 200, 1, 1000) }),
   }));
+  const reportData = (): ReportData => {
+    const { store, policy: activePolicy } = deps.runtime();
+    const policy = activePolicy();
+    const budgets = policy.vendorMonthlyBudgets ?? {};
+    const blocked = new Map<string, { rule: string; currency: string; count: number; amount: number }>();
+    for (const l of store.spendLedger().filter((x) => x.status === "denied")) {
+      const k = `${l.rule}|${l.currency}`;
+      const b = blocked.get(k) ?? { rule: l.rule, currency: l.currency, count: 0, amount: 0 };
+      b.count += 1;
+      b.amount += l.amount;
+      blocked.set(k, b);
+    }
+    const overview = store.spendOverview(budgets);
+    return {
+      generatedAt: overview.generatedAt,
+      mode: deps.mode,
+      policy: { name: policy.name, version: policy.version, hash: policy.hash, currency: policy.currency },
+      audit: store.audit.verify(),
+      overview,
+      digest: store.spendDigest(budgets),
+      blockedByRule: [...blocked.values()].sort((a, b) => b.amount - a.amount || a.rule.localeCompare(b.rule)),
+    };
+  };
+  // A report is read by a person and printed, never scripted: no script can run in it, whatever a payee name contains.
+  const REPORT_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
+  app.get("/api/report", async (_req, reply) => {
+    reply.header("content-type", "text/html; charset=utf-8");
+    reply.header("content-security-policy", REPORT_CSP);
+    reply.header("content-disposition", 'inline; filename="spend-report.html"');
+    return renderReport(reportData()).html;
+  });
+  app.get("/api/report.md", async (_req, reply) => {
+    reply.header("content-type", "text/markdown; charset=utf-8");
+    reply.header("content-disposition", 'attachment; filename="spend-report.md"');
+    return renderReport(reportData()).markdown;
+  });
+  app.get("/api/digest", async () => {
+    const { store, policy } = deps.runtime();
+    return store.spendDigest(policy().vendorMonthlyBudgets ?? {});
+  });
+  app.get("/api/spend", async () => {
+    const { store, policy } = deps.runtime();
+    return store.spendOverview(policy().vendorMonthlyBudgets ?? {});
+  });
+  // A ledger for the books. Payee names come from untrusted invoices, so cells that a spreadsheet would run as a formula are defused.
+  app.get("/api/spend/export.csv", async (_req, reply) => {
+    reply.header("content-type", "text/csv; charset=utf-8");
+    reply.header("content-disposition", 'attachment; filename="spend-ledger.csv"');
+    return spendCsv(deps.runtime().store.spendLedger());
+  });
+
   // Everything needed to verify the log offline: `pnpm verify:audit <file>` checks it without trusting this server.
   app.get("/api/audit/export", async (_req, reply) => {
     reply.header("content-disposition", 'attachment; filename="audit-export.json"');
@@ -397,4 +465,17 @@ export function createApp(deps: AppDeps): FastifyInstance {
     });
   }
   return app;
+}
+
+const csvCell = (v: string | number | null): string => {
+  let t = v === null ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(t)) t = `'${t}`;
+  return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+};
+
+/** Amounts are written in major units with two decimals; status and verdict are the firewall's own words, not the document's. */
+export function spendCsv(lines: SpendLine[]): string {
+  const head = ["date", "status", "verdict", "rule", "payee", "account", "vendor_id", "amount", "currency", "provider_status", "agent", "key"];
+  const rows = lines.map((l) => [l.createdAt, l.status, l.verdict, l.rule, l.payee, l.account, l.vendorId, (l.amount / 100).toFixed(2), l.currency, l.providerStatus, l.agentId, l.idempotencyKey]);
+  return `${[head, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n")}\r\n`;
 }

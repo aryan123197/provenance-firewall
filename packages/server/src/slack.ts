@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { SCENARIOS, GullibleAgent, type Agent, type Scenario } from "@pfw/harness";
 import { LlmBudgetError, LlmRefusalError } from "@pfw/llm";
+import type { SpendDigest } from "@pfw/store";
 import type { DemoOutcome, DemoRunner } from "./demo";
 
 /** Slack signs every request; anything older than this is treated as a replay. */
@@ -20,6 +21,8 @@ export interface SlackDeps {
   config: SlackConfig;
   runner: DemoRunner;
   llmAgent?: Agent;
+  /** What `digest` replies with. Read-only: it never starts a run or changes anything. */
+  digest?: () => SpendDigest;
   /** Test seam. Defaults to the global fetch. */
   fetch?: typeof fetch;
   now?: () => number;
@@ -33,12 +36,13 @@ export function verifySlackSignature(secret: string, timestamp: string | undefin
   return expected.length === signature.length && timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
 }
 
-export type Command = { kind: "help" } | { kind: "run"; scenario: Scenario; request: string };
+export type Command = { kind: "help" } | { kind: "digest" } | { kind: "run"; scenario: Scenario; request: string };
 
 /** `@bot <scenario-id> [what the user asks]`. The mention, any other `<@U...>` tokens and Slack's link markup are dropped. */
 export function parseCommand(text: string): Command {
   const clean = text.replace(/<@[A-Z0-9]+>/g, " ").replace(/<([^|>]+)\|([^>]+)>/g, "$2").replace(/<([^>]+)>/g, "$1").trim();
   const [first = "", ...rest] = clean.split(/\s+/);
+  if (first.toLowerCase() === "digest") return { kind: "digest" };
   const scenario = SCENARIOS.find((s) => s.id === first.toLowerCase());
   if (!scenario) return { kind: "help" };
   return { kind: "run", scenario, request: rest.join(" ").slice(0, MAX_REQUEST_CHARS).trim() };
@@ -48,7 +52,7 @@ const dollars = (minor: number) => `$${(minor / 100).toFixed(2)}`;
 
 export function helpText(): string {
   const lines = SCENARIOS.map((s) => `• \`${s.id}\` (${s.kind === "attack" ? "attack" : "legitimate"}): ${s.title}`);
-  return `Run a scenario with \`<scenario-id> [what the user asks]\`. The text after the id only changes what the user says, and only the live Claude agent reads it.\n${lines.join("\n")}`;
+  return `Run a scenario with \`<scenario-id> [what the user asks]\`. The text after the id only changes what the user says, and only the live Claude agent reads it. \`digest\` shows what needs a person today (read-only).\n${lines.join("\n")}`;
 }
 
 export function formatOutcome(o: DemoOutcome): string {
@@ -63,6 +67,20 @@ export function formatOutcome(o: DemoOutcome): string {
   ];
   for (const c of o.firewalled.calls) lines.push(`• \`${c.key}\`: ${c.status}${c.rule ? ` (${c.rule})` : ""}: ${c.message}`);
   if (o.firewalled.pendingApprovals) lines.push(`${o.firewalled.pendingApprovals} payment${o.firewalled.pendingApprovals === 1 ? " is" : "s are"} waiting in the dashboard's approval inbox. Approving happens there, not in Slack.`);
+  return lines.join("\n");
+}
+
+const usd = (minor: number, currency: string) => (currency === "USD" ? dollars(minor) : `${(minor / 100).toFixed(2)} ${currency}`);
+
+/** The same figures as the dashboard's "Today" strip, as plain Slack text. */
+export function formatDigest(d: SpendDigest): string {
+  const lines = [`*Today (${d.day}, UTC)*`];
+  if (d.today.length === 0) lines.push("No payments decided yet today.");
+  for (const t of d.today) lines.push(`• ${t.currency}: sent ${usd(t.spent, t.currency)}, held ${usd(t.held, t.currency)}, blocked ${usd(t.blocked, t.currency)}`);
+  if (d.pendingApprovals.count) lines.push(`• ${d.pendingApprovals.count} payment${d.pendingApprovals.count === 1 ? " is" : "s are"} waiting for approval in the dashboard (oldest since ${d.pendingApprovals.oldestRequestedAt}).`);
+  if (d.attention) lines.push(`• ${d.attention} sent payout${d.attention === 1 ? " has" : "s have"} not arrived as paid.`);
+  for (const b of d.budgets.filter((x) => x.state !== "ok")) lines.push(`• ${b.name}: ${b.state === "over" ? "over" : "near"} its monthly budget (${dollars(b.spent)} of ${dollars(b.budget)}, ${b.percent}%).`);
+  if (!d.needsAttention) lines.push("Nothing needs a person right now.");
   return lines.join("\n");
 }
 
@@ -97,6 +115,7 @@ export function registerSlack(app: FastifyInstance, deps: SlackDeps): void {
     const thread = ev.thread_ts ?? ev.ts;
     const cmd = parseCommand(ev.text ?? "");
     if (cmd.kind === "help") return post(channel, thread, helpText());
+    if (cmd.kind === "digest") return post(channel, thread, deps.digest ? formatDigest(deps.digest()) : "The digest is not available on this server.");
     const useLlm = Boolean(deps.llmAgent && cmd.request);
     const agent: Agent = useLlm ? deps.llmAgent! : new GullibleAgent();
     const scenario = cmd.request && useLlm ? { ...cmd.scenario, request: cmd.request } : cmd.scenario;

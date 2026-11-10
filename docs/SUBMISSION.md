@@ -19,7 +19,7 @@ Provenance Firewall is a policy layer between an LLM agent and PayPal that track
 - Reconciliation: PayPal webhooks are signature-checked and matched against what was authorized; anything PayPal did that we did not authorize shows up as drift.
 - A red-team harness: 26 scenarios run against an unprotected baseline and the firewalled agent, with a committed scorecard that includes the false-block rate.
 - A Slack input: mention the app with a scenario id and the same run happens against the live firewall, with the verdicts posted in the thread (approving a held payment stays in the dashboard). **[fill after live run: tested only against a stubbed Slack API so far; try it in a real workspace before you claim it]**
-- An operator dashboard: live activity, a decision-replay screen that shows each field's source, an approval inbox, a vendor registry, and policy and scorecard. Policies can be written in plain English; a model drafts a patch, and it activates only after generated tests pass and a person confirms.
+- An operator dashboard: live activity with a "needs attention today" strip, a Spend tab (totals, per day and per vendor, money protected, monthly budgets, CSV ledger and a printable report that states whether the audit log verifies), a decision-replay screen that shows each field's source, an approval inbox, a vendor registry, and policy and scorecard. Policies can be written in plain English; a model drafts a patch, and it activates only after generated tests pass and a person confirms.
 
 **Where PayPal is used**
 
@@ -27,7 +27,7 @@ The adapter calls the PayPal **Payouts** API to pay vendors (with `PayPal-Reques
 
 **Where the LLM is used**
 
-A Claude-driven procurement agent reads invoices and proposes payments through the firewall, and a compiler turns a plain-English policy into a patch of tunable thresholds. The LLM never decides whether money moves: the decision function is pure code, the agent's `pay` goes through it, and a compiled policy takes effect only after its tests pass and a person confirms. Observed with a real model (`claude-sonnet-5-5`, 26 scenarios, two full runs): it resisted the classic injection attacks on its own, and paid wrongly only where it lacked the facts (inflated totals against a purchase order, a switched currency, a vendor outside the allowlist, duplicates), which the firewall stopped every time. The README states this in full.
+A Claude-driven procurement agent reads invoices and proposes payments through the firewall, and a compiler turns a plain-English policy into a patch of tunable thresholds. The compiler can also set a monthly budget for a registered vendor: it is shown the registry's vendor ids, and a vendor that is not registered comes back as an unsupported clause instead of a guessed id (checked once against the real model, `claude-sonnet-5-5`; the unit tests use a stub). The LLM never decides whether money moves: the decision function is pure code, the agent's `pay` goes through it, and a compiled policy takes effect only after its tests pass and a person confirms. Observed with a real model (`claude-sonnet-5-5`, 26 scenarios, two full runs): it resisted the classic injection attacks on its own, and paid wrongly only where it lacked the facts (inflated totals against a purchase order, a switched currency, a vendor outside the allowlist, duplicates), which the firewall stopped every time. The README states this in full.
 
 **Results (committed scorecard, `reports/scorecard.md`)**
 
@@ -61,7 +61,9 @@ Use demo mode (`pnpm dev:demo`, or the Render URL) and click through in this ord
 | 2:20 to 2:45 | Scorecard: the bars and the table. Point at the one scenario where the firewalled side still loses $800. | "Twenty attacks: the unprotected agent lost money in all of them. The firewall in one, bounded by a daily cap. Zero legitimate payments wrongly denied." |
 | 2:45 to 3:00 | The repo and the live URL | "Open source, running now." |
 
-Rehearse once with a timer. Do not claim live PayPal in the video unless you have run `pnpm e2e` against the sandbox. Check the official rules on third-party trademarks and music before recording.
+Optional if time allows (swap it in for the policy row, or cut the approvals row shorter): **Spend** tab → *Try a budget* → *Set the budget and pay the invoice*. Acme's budget drops to $400.00, the $450.00 invoice that is normally paid automatically is held (`vendor_budget`), and the link goes to Approvals. Say: "A monthly budget does not block the payment, it asks a person."
+
+Rehearse once with a timer. The PayPal sandbox has been exercised live (Payouts, Invoicing, Orders, webhooks; see `docs/PAYPAL_ASSUMPTIONS.md`), so the video may say so for those; it may not claim a genuinely signed webhook delivery (that needs the public deploy) or the Slack input in a real workspace. Check the official rules on third-party trademarks and music before recording.
 
 ## Checklist status
 
@@ -71,7 +73,7 @@ Rehearse once with a timer. Do not claim live PayPal in the video unless you hav
 | README with run instructions, sandbox credential instructions, threat model | Done |
 | Working demo with run instructions | Done locally (`pnpm dev:demo`) |
 | Hosted demo URL | Needs your Render account: connect the repo, it reads `render.yaml` |
-| PayPal central, sandbox credentials in README | Documented; **not yet exercised live** |
+| PayPal central, sandbox credentials in README | Done: sandbox exercised live (Payouts, Invoicing, Orders, webhook registration); signed webhook delivery needs the public deploy |
 | Text description covering features, PayPal use, LLM use | Draft above |
 | Demo video, YouTube, under 3 minutes | Yours to record; script above |
 | Registered on Devpost; submit before the deadline and confirm it shows as submitted, not draft | Yours |

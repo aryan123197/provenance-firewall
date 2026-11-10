@@ -36,6 +36,8 @@ export function PolicyScreen() {
               {Object.entries(p.categoryApprovalThresholds).map(([cat, t]) => (
                 <Fragment key={cat}><dt>Approval needed above, {cat}</dt><dd>{money(t, p.currency)}</dd></Fragment>
               ))}
+              <dt>Monthly vendor budgets</dt>
+              <dd>{p.vendorMonthlyBudgets && Object.keys(p.vendorMonthlyBudgets).length ? Object.entries(p.vendorMonthlyBudgets).map(([v, n]) => `${v} ${money(n, p.currency)}`).join(", ") : "none set"}</dd>
               <dt>New payees denied on</dt><dd>{p.newPayeeDenyDays.length ? p.newPayeeDenyDays.map((d) => DAYS[d]).join(", ") : "no day (held for approval)"}</dd>
               <dt>Currency</dt><dd>{p.currency}</dd>
             </dl>
@@ -45,7 +47,7 @@ export function PolicyScreen() {
 
         <Card title="How a decision is made">
           <ol className="rules-list">
-            {(["payee_change", "untrusted_payee", "new_payee", "amount_mismatch", "approval_threshold", "hard_limit", "allowlist", "velocity"] as const).map((r) => (
+            {(["payee_change", "untrusted_payee", "new_payee", "amount_mismatch", "approval_threshold", "hard_limit", "vendor_budget", "allowlist", "velocity"] as const).map((r) => (
               <li key={r}>
                 <strong>{RULES[r]!.title}</strong>
                 <span>{RULES[r]!.what}</span>

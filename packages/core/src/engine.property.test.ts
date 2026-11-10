@@ -153,6 +153,24 @@ describe("engine safety properties (independent of the rule code)", { timeout: 6
     );
   });
 
+  test("a budget can only make a verdict stricter, and only up to needs-approval", () => {
+    const budgeted = loadPolicy(`${readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8")}\nvendorMonthlyBudgets:\n  acme: 20000\n  beta: 0\n`);
+    fc.assert(
+      fc.property(intents, states, fc.integer({ min: 0, max: 400_000 }), (i, s, month) => {
+        const st = { ...s, vendorSpentThisMonth: { acme: month, beta: month, lucky: month } };
+        const without = evaluate(i, policy, st);
+        const withBudget = evaluate(i, budgeted, st);
+        expect(RANK[withBudget.verdict]).toBeGreaterThanOrEqual(RANK[without.verdict]);
+        if (without.verdict !== "deny" && withBudget.verdict !== without.verdict) {
+          expect(withBudget.verdict).toBe("require_approval");
+          expect(withBudget.findings.some((x) => x.rule === "vendor_budget")).toBe(true);
+        }
+        if (without.verdict === "deny") expect(withBudget.verdict).toBe("deny");
+      }),
+      runs,
+    );
+  });
+
   test("the verdict depends only on values and trust, not on which source produced them", () => {
     const relabel = (i: ResolvedIntent): ResolvedIntent => ({
       ...i,

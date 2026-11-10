@@ -1,11 +1,12 @@
 import type { Decision } from "@pfw/core";
-import type { Approval, AuditEntry, DecisionRecord, DecisionSummary, Drift } from "@pfw/store";
+import type { Approval, AuditEntry, DecisionRecord, DecisionSummary, Drift, SpendDigest, SpendLine, SpendOverview } from "@pfw/store";
 import type { Scorecard, SideScore } from "@pfw/harness";
 import type { AdjustmentRecord, BankLine, LedgerEntry, ReconConfig, ReconItem, ReconReport } from "@pfw/recon";
 
 export type ScenarioResultView = Scorecard["scenarios"][number];
 
 export type { AdjustmentRecord, BankLine, LedgerEntry, ReconItem, ReconReport };
+export type { SpendDigest, SpendLine, SpendOverview };
 export type { Approval, AuditEntry, Decision, DecisionRecord, DecisionSummary, Drift, Scorecard, SideScore };
 
 export interface Status {
@@ -98,6 +99,7 @@ export interface PolicyView {
     velocity: { maxPerHour: number };
     categoryApprovalThresholds: Record<string, number>;
     newPayeeDenyDays: number[];
+    vendorMonthlyBudgets?: Record<string, number>;
   };
   yaml: string;
 }
@@ -190,6 +192,8 @@ export const api = {
   addPurchaseOrder: (po: { id: string; vendorId: string; amount: number; currency: string }, changedBy: string) =>
     post<{ ok: true }>("/api/registry/purchase-orders", { ...po, changedBy }),
   recon: () => request<ReconView>("/api/recon"),
+  spend: () => request<SpendOverview>("/api/spend"),
+  digest: () => request<SpendDigest>("/api/digest"),
   reconImport: (lines: unknown, importedBy: string) => post<{ added: number; unchanged: number }>("/api/recon/bank-lines", { lines, importedBy }),
   reconRun: (runBy: string) => post<{ proposed: AdjustmentRecord[] }>("/api/recon/run", { runBy }),
   reconConfirm: (bankLineId: string, ledgerKey: string, resolvedBy: string, note: string) =>
@@ -199,6 +203,11 @@ export const api = {
   reconReopen: (id: string, reopenedBy: string) => post<AdjustmentRecord>(`/api/recon/adjustments/${encodeURIComponent(id)}/reopen`, { reopenedBy }),
   drift: () => request<{ drift: Drift[] }>("/api/drift").then((r) => r.drift),
   policy: () => request<PolicyView>("/api/policy"),
+  /** Sets (or, with null, removes) one vendor's monthly budget: a one-field policy patch through the normal tested activation. */
+  setBudget: async (vendorId: string, amountMinor: number | null, confirmedBy: string) => {
+    const { policy } = await request<PolicyView>("/api/policy");
+    return post<{ ok: true; version: number }>("/api/policy/activate", { baseVersion: policy.version, patch: { vendorMonthlyBudgets: { [vendorId]: amountMinor } }, confirmedBy });
+  },
   compilePolicy: (english: string) => post<CompileResult>("/api/policy/compile", { english }),
   activatePolicy: (c: CompileResult, confirmedBy: string, acknowledgeUnsupported: boolean) =>
     post<{ ok: true; version: number }>("/api/policy/activate", {

@@ -6,7 +6,7 @@ import { hashPolicy, type Policy, type PolicyDoc } from "./policy";
 
 export interface PolicyTestResult {
   id: string;
-  group: "thresholds" | "limits" | "new payees" | "allowlist" | "provenance (built in)";
+  group: "thresholds" | "limits" | "budgets" | "new payees" | "allowlist" | "provenance (built in)";
   description: string;
   expected: string;
   actual: string;
@@ -106,6 +106,26 @@ export function generatePolicyTests(p: PolicyDoc): (Case & { policy: Policy })[]
         intent: trusted(first, amt, cur, `${id}-${n}`),
         state,
         expect: { verdict: fits ? "allow" : "deny" },
+      });
+    }
+  }
+
+  // Monthly budgets: spend already at budget - 1 cent, then a 1 cent payment (fits) and a 2 cent payment (held for approval).
+  // The vendor takes the budget's id, so the engine looks the budget up exactly as it will for the real vendor.
+  for (const [vendorId, budget] of Object.entries(p.vendorMonthlyBudgets ?? {})) {
+    const bv: VendorRecord = { ...first, id: vendorId };
+    const spent = Math.max(budget - 1, 0);
+    const state = { ...baseState(allVendors.map((v) => (v.id === first.id ? bv : v))), vendorSpentThisMonth: { [vendorId]: spent } };
+    for (const [n, amt] of [["fits", 1], ["over", 2]] as const) {
+      const fits = spent + amt <= budget;
+      if (amt > Math.min(p.limits.perPayment, p.limits.perVendorPerDay, p.limits.totalPerDay, p.categoryApprovalThresholds[first.category] ?? p.approvalThreshold)) continue;
+      cases.push({
+        id: `budget-${vendorId}-${n}`,
+        group: "budgets",
+        description: `With ${usd(spent)} already paid to ${vendorId} this month, ${usd(amt)} ${fits ? "fits within" : "goes past"} its monthly budget of ${usd(budget)}`,
+        intent: trusted(bv, amt, cur, `budget-${vendorId}-${n}`),
+        state,
+        expect: fits ? { verdict: "allow" } : { verdict: "require_approval", rule: "vendor_budget" },
       });
     }
   }

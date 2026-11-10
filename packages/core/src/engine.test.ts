@@ -241,3 +241,34 @@ describe("policy loading", () => {
     expect(() => loadPolicy(text)).toThrow(/invalid policy/);
   });
 });
+
+describe("vendor monthly budgets", () => {
+  const base = readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8");
+  const budgeted = loadPolicy(`${base}\nvendorMonthlyBudgets:\n  acme: 10000\n`);
+  const go = (month: number, amount = 4500, p = budgeted) => evaluate(intent({ amount: f("user", amount) }), p, state({ vendorSpentThisMonth: { acme: month } }));
+
+  test("a policy with no budgets keeps its hash, so adding the field changed no existing policy", () => {
+    expect(loadPolicy(base).hash).toBe(policy.hash);
+    expect(budgeted.hash).not.toBe(policy.hash);
+  });
+  test("within the budget is allowed", () => {
+    expect(go(5000).verdict).toBe("allow");
+    expect(go(5500).verdict).toBe("allow"); // exactly at the budget
+  });
+  test("past the budget is held for a person, not denied", () => {
+    const d = go(5501);
+    expect(d).toMatchObject({ verdict: "require_approval", rule: "vendor_budget" });
+    expect(d.reason).toContain("monthly budget");
+    expect(d.alert).toBe(false);
+  });
+  test("a vendor with no budget, and an unknown month total, are unaffected", () => {
+    expect(go(1_000_000, 4500, policy).verdict).toBe("allow");
+    expect(evaluate(intent(), budgeted, state()).verdict).toBe("allow");
+  });
+  test("a hard cap still wins over a budget finding", () => {
+    expect(go(0, 100_001).verdict).toBe("deny");
+  });
+  test("another vendor's spending does not count", () => {
+    expect(evaluate(intent(), budgeted, state({ vendorSpentThisMonth: { lucky: 999_999 } })).verdict).toBe("allow");
+  });
+});

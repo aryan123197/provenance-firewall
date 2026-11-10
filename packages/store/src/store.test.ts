@@ -229,6 +229,118 @@ describe("dashboard queries", () => {
   });
 });
 
+describe("spend overview", () => {
+  test("an empty store has empty totals", () => {
+    expect(store.spendOverview()).toMatchObject({ totals: [], byDay: [], byVendor: [], moneyProtected: [], needsAttention: [], openCommitments: [] });
+  });
+  test("rolls up paid, held and denied money, and counts denied and rejected as protected", () => {
+    store.addPurchaseOrder({ id: "po1", vendorId: "acme", amount: 9000, currency: "USD" });
+    store.decide(intent({ idempotencyKey: "paid" }), policy);
+    store.saveExecution("paid", { state: "executed", retryable: false, payload: {}, reference: "B1" });
+    store.setProviderStatus("paid", "success");
+    store.decide(intent({ idempotencyKey: "held", amount: f("user", 60000) }), policy);
+    store.decide(intent({ idempotencyKey: "swap", account: f("invoice", "acct_evil"), payee: f("invoice", "Evil Co") }), policy);
+    store.decide(intent({ idempotencyKey: "sent", amount: f("user", 1000) }), policy);
+    store.saveExecution("sent", { state: "executed", retryable: false, payload: {}, reference: "B2" });
+    store.decide(intent({ idempotencyKey: "gone", amount: f("user", 2000) }), policy);
+    store.saveExecution("gone", { state: "executed", retryable: false, payload: {}, reference: "B3" });
+    store.setProviderStatus("gone", "unclaimed");
+    store.decide(intent({ idempotencyKey: "boom", amount: f("user", 3000) }), policy);
+    store.saveExecution("boom", { state: "failed", retryable: false, payload: {} });
+    store.decide(intent({ idempotencyKey: "queued", amount: f("user", 500) }), policy);
+
+    const o = store.spendOverview();
+    const status = Object.fromEntries(o.totals.map((t) => [t.status, t]));
+    expect(status.paid).toMatchObject({ count: 1, amount: 4500 });
+    expect(status.sent).toMatchObject({ count: 1, amount: 1000 });
+    expect(status.attention).toMatchObject({ count: 1, amount: 2000 });
+    expect(status.failed).toMatchObject({ count: 1, amount: 3000 });
+    expect(status.held).toMatchObject({ count: 1, amount: 60000 });
+    expect(status.queued).toMatchObject({ count: 1, amount: 500 });
+    expect(status.denied?.count).toBe(1);
+    expect(o.moneyProtected).toEqual([{ currency: "USD", count: 1, amount: status.denied!.amount }]);
+    expect(o.needsAttention.map((l) => l.idempotencyKey).sort()).toEqual(["boom", "gone"]);
+    expect(o.openCommitments).toEqual([{ id: "po1", vendorId: "acme", amount: 9000, currency: "USD", status: "open", vendorName: "Acme Supplies" }]);
+    const acme = o.byVendor.find((v) => v.vendorId === "acme")!;
+    expect(acme).toMatchObject({ name: "Acme Supplies", currency: "USD", payments: 3, spent: 7500 });
+    expect(o.byVendor.some((v) => v.vendorId === null && v.name === "Evil Co" && v.blocked > 0)).toBe(true);
+  });
+  test("a rejected approval counts as money that did not move", () => {
+    store.decide(intent({ idempotencyKey: "big", amount: f("user", 60000) }), policy);
+    const id = store.listApprovals("pending")[0]!.id;
+    store.resolveApproval(id, { approve: false, approver: "alice" }, policy);
+    expect(store.spendOverview().moneyProtected).toEqual([{ currency: "USD", count: 1, amount: 60000 }]);
+  });
+  test("days are UTC buckets and currencies are never added together", () => {
+    store.decide(intent({ idempotencyKey: "d1" }), policy);
+    advance(24 * HOUR);
+    store.decide(intent({ idempotencyKey: "d2", amount: f("user", 1000) }), policy);
+    store.decide(intent({ idempotencyKey: "eur", currency: f("user", "EUR") }), policy);
+    const days = store.spendOverview().byDay;
+    expect(days.filter((d) => d.currency === "USD").map((d) => [d.day, d.spent + d.held + d.blocked])).toEqual([["2026-10-27", 4500], ["2026-10-28", 1000]]);
+    expect(days.some((d) => d.currency === "EUR")).toBe(true);
+  });
+  test("the ledger is not capped like the activity feed", () => {
+    for (let n = 0; n < 505; n++) store.decide(intent({ idempotencyKey: `k${n}`, amount: f("user", 1) }), policy);
+    expect(store.spendLedger()).toHaveLength(505);
+  });
+});
+
+describe("vendor monthly budgets", () => {
+  const budgeted = loadPolicy(`${readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8")}\nvendorMonthlyBudgets:\n  acme: 10000\n`);
+  test("this month's payments count; last month's do not; a held payment can still be approved", () => {
+    now = new Date("2026-09-30T12:00:00.000Z");
+    store.decide(intent({ idempotencyKey: "old", amount: f("user", 9000) }), budgeted);
+    now = new Date("2026-10-01T00:00:00.000Z");
+    expect(store.decide(intent({ idempotencyKey: "m1", amount: f("user", 9000) }), budgeted).decision.verdict).toBe("allow");
+    const over = store.decide(intent({ idempotencyKey: "m2", amount: f("user", 2000) }), budgeted).decision;
+    expect(over).toMatchObject({ verdict: "require_approval", rule: "vendor_budget" });
+    const id = store.listApprovals("pending")[0]!.id;
+    expect(store.resolveApproval(id, { approve: true, approver: "alice" }, budgeted)).toMatchObject({ ok: true, status: "approved" });
+    expect(store.spendOverview({ acme: 10000, ghost: 500 }).budgets).toEqual([
+      { vendorId: "acme", name: "Acme Supplies", budget: 10000, spent: 11000 },
+      { vendorId: "ghost", name: "ghost", budget: 500, spent: 0 },
+    ]);
+    expect(store.spendOverview().budgets).toEqual([]);
+  });
+});
+
+describe("spend digest", () => {
+  const budgeted = loadPolicy(`${readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8")}\nvendorMonthlyBudgets:\n  acme: 10000\n`);
+  const paid = (key: string, cents: number) => {
+    store.decide(intent({ idempotencyKey: key, amount: f("user", cents) }), budgeted);
+    store.saveExecution(key, { state: "executed", retryable: false, payload: {}, reference: `B${key}` });
+  };
+  test("an empty store needs nobody's attention", () => {
+    expect(store.spendDigest()).toMatchObject({ day: "2026-10-27", today: [], pendingApprovals: { count: 0, oldestRequestedAt: null }, attention: 0, budgets: [], needsAttention: false });
+  });
+  test("a budget is ok below 80%, near at 80%, and over once passed, by exact cents", () => {
+    const state = (n: number) => store.spendDigest({ acme: n }).budgets[0]!;
+    paid("a", 7999);
+    expect(state(10000)).toMatchObject({ spent: 7999, percent: 80, state: "ok" });
+    paid("b", 1);
+    expect(state(10000)).toMatchObject({ spent: 8000, percent: 80, state: "near" });
+    paid("c", 2000);
+    expect(state(10000)).toMatchObject({ spent: 10000, percent: 100, state: "near" });
+    expect(state(9999)).toMatchObject({ state: "over" });
+    expect(state(0)).toMatchObject({ percent: 100, state: "over" });
+    expect(store.spendDigest({ acme: 10000 }).needsAttention).toBe(true);
+  });
+  test("today counts only this UTC day; held approvals and unconfirmed payouts need attention", () => {
+    paid("old", 1000);
+    advance(24 * HOUR);
+    store.decide(intent({ idempotencyKey: "held", amount: f("user", 60000) }), budgeted);
+    paid("sent", 500);
+    store.setProviderStatus("sent", "unclaimed");
+    const d = store.spendDigest();
+    expect(d.day).toBe("2026-10-28");
+    expect(d.today).toEqual([{ currency: "USD", spent: 500, held: 60000, blocked: 0 }]);
+    expect(d.pendingApprovals).toEqual({ count: 1, oldestRequestedAt: "2026-10-28T12:00:00.000Z" });
+    expect(d.attention).toBe(1);
+    expect(d.needsAttention).toBe(true);
+  });
+});
+
 describe("policy versions", () => {
   test("there is no active stored policy until one is activated", () => {
     expect(store.activePolicy()).toBeNull();

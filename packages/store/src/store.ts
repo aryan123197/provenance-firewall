@@ -120,6 +120,62 @@ export interface DecisionSummary {
   approval: { id: string; status: Approval["status"] } | null;
 }
 
+/** Where a payment stands, for the spend view. "attention" means PayPal reports it unclaimed, returned or failed. */
+export type SpendStatus = "paid" | "sent" | "attention" | "failed" | "held" | "queued" | "denied";
+
+export interface SpendLine {
+  idempotencyKey: string;
+  createdAt: string;
+  agentId: string;
+  payee: string;
+  account: string;
+  vendorId: string | null;
+  amount: number;
+  currency: string;
+  verdict: Decision["verdict"];
+  rule: Decision["rule"];
+  status: SpendStatus;
+  providerStatus: string | null;
+}
+
+export interface SpendOverview {
+  generatedAt: string;
+  /** Totals by currency and status. Currencies are never added together. */
+  totals: { currency: string; status: SpendStatus; count: number; amount: number }[];
+  /** UTC days, oldest first, with money that left (paid, sent, attention), money held for approval and money blocked. */
+  byDay: { day: string; currency: string; spent: number; held: number; blocked: number }[];
+  byVendor: { vendorId: string | null; name: string; currency: string; payments: number; spent: number; held: number; blocked: number }[];
+  /** Denied payments, and approvals a person rejected: money that did not move. */
+  moneyProtected: { currency: string; count: number; amount: number }[];
+  openCommitments: (PurchaseOrderRecord & { vendorName: string })[];
+  needsAttention: SpendLine[];
+  /** One row per vendor with a monthly budget in the active policy: this UTC month's payments against it. */
+  budgets: { vendorId: string; name: string; budget: number; spent: number }[];
+}
+
+export interface SpendDigest {
+  generatedAt: string;
+  /** UTC date the "today" figures are for. */
+  day: string;
+  today: { currency: string; spent: number; held: number; blocked: number }[];
+  pendingApprovals: { count: number; oldestRequestedAt: string | null };
+  /** Sent payouts PayPal did not confirm as paid, and failed sends. */
+  attention: number;
+  /** Every budget in the active policy with where it stands this UTC month: near is 80% or more used, over is past it. */
+  budgets: { vendorId: string; name: string; budget: number; spent: number; percent: number; state: "ok" | "near" | "over" }[];
+  /** True when something here needs a person's eyes: a held payment, a payout to chase, or a budget that is near or over. */
+  needsAttention: boolean;
+}
+
+const OUT = new Set<SpendStatus>(["paid", "sent", "attention"]);
+const ATTENTION = new Set(["unclaimed", "returned", "failed"]);
+const spendStatus = (d: DecisionSummary): SpendStatus => {
+  if (d.execution === "executed") return d.providerStatus === "success" ? "paid" : d.providerStatus && ATTENTION.has(d.providerStatus) ? "attention" : "sent";
+  if (d.execution === "failed") return "failed";
+  if (d.verdict === "deny" || d.approval?.status === "rejected") return "denied";
+  return d.verdict === "require_approval" ? "held" : "queued";
+};
+
 /** Everything the decision-replay screen shows for one payment. */
 export interface DecisionRecord {
   summary: DecisionSummary;
@@ -388,6 +444,95 @@ export class Store {
       )
       .all(opts.limit ?? 200, opts.offset ?? 0) as SummaryRow[];
     return rows.map(toSummary);
+  }
+
+  /** Every decision, newest first, with where it stands. Unpaged (listDecisions is capped), for the spend view and its CSV. */
+  spendLedger(): SpendLine[] {
+    const vendors = new Map(this.listVendors().map((v) => [`${v.name}\u0000${v.account}`, v.id]));
+    return this.listDecisions({ limit: -1 }).map((d) => ({
+      idempotencyKey: d.idempotencyKey,
+      createdAt: d.createdAt,
+      agentId: d.agentId,
+      payee: d.payee,
+      account: d.account,
+      vendorId: vendors.get(`${d.payee}\u0000${d.account}`) ?? null,
+      amount: d.amount,
+      currency: d.currency,
+      verdict: d.verdict,
+      rule: d.rule,
+      status: spendStatus(d),
+      providerStatus: d.providerStatus,
+    }));
+  }
+
+  /** Read-only roll-up of the ledger: nothing here changes a decision. Days are UTC, as the daily caps are. */
+  spendOverview(budgets: Readonly<Record<string, number>> = {}): SpendOverview {
+    const lines = this.spendLedger();
+    const names = new Map(this.listVendors().map((v) => [v.id, v.name]));
+    const totals = new Map<string, SpendOverview["totals"][number]>();
+    const days = new Map<string, SpendOverview["byDay"][number]>();
+    const vendors = new Map<string, SpendOverview["byVendor"][number]>();
+    const protectedBy = new Map<string, { currency: string; count: number; amount: number }>();
+    const bucket = (s: SpendStatus) => (OUT.has(s) ? "spent" : s === "held" || s === "queued" ? "held" : s === "denied" ? "blocked" : null);
+
+    for (const l of lines) {
+      const t = totals.get(`${l.currency}|${l.status}`) ?? { currency: l.currency, status: l.status, count: 0, amount: 0 };
+      t.count += 1;
+      t.amount += l.amount;
+      totals.set(`${l.currency}|${l.status}`, t);
+
+      const b = bucket(l.status);
+      if (!b) continue;
+      const day = l.createdAt.slice(0, 10);
+      const d = days.get(`${day}|${l.currency}`) ?? { day, currency: l.currency, spent: 0, held: 0, blocked: 0 };
+      d[b] += l.amount;
+      days.set(`${day}|${l.currency}`, d);
+
+      const vk = `${l.vendorId ?? ""}|${l.vendorId ? "" : l.payee}|${l.currency}`;
+      const v = vendors.get(vk) ?? { vendorId: l.vendorId, name: l.vendorId ? (names.get(l.vendorId) ?? l.vendorId) : l.payee, currency: l.currency, payments: 0, spent: 0, held: 0, blocked: 0 };
+      v[b] += l.amount;
+      if (b === "spent") v.payments += 1;
+      vendors.set(vk, v);
+
+      if (b === "blocked") {
+        const p = protectedBy.get(l.currency) ?? { currency: l.currency, count: 0, amount: 0 };
+        p.count += 1;
+        p.amount += l.amount;
+        protectedBy.set(l.currency, p);
+      }
+    }
+
+    return {
+      generatedAt: this.clock().toISOString(),
+      totals: [...totals.values()],
+      byDay: [...days.values()].sort((a, b) => a.day.localeCompare(b.day) || a.currency.localeCompare(b.currency)),
+      byVendor: [...vendors.values()].sort((a, b) => b.spent + b.held - (a.spent + a.held) || a.name.localeCompare(b.name)),
+      moneyProtected: [...protectedBy.values()],
+      openCommitments: this.listPurchaseOrders()
+        .filter((p) => p.status === "open")
+        .map((p) => ({ ...p, vendorName: names.get(p.vendorId) ?? p.vendorId })),
+      needsAttention: lines.filter((l) => l.status === "attention" || l.status === "failed"),
+      budgets: Object.entries(budgets).map(([vendorId, budget]) => ({ vendorId, name: names.get(vendorId) ?? vendorId, budget, spent: this.vendorSpentThisMonth(this.clock())[vendorId] ?? 0 })),
+    };
+  }
+
+  /** What a person should look at today. Built from the same ledger as the Spend tab, so the two cannot disagree. */
+  spendDigest(budgets: Readonly<Record<string, number>> = {}): SpendDigest {
+    const o = this.spendOverview(budgets);
+    const day = o.generatedAt.slice(0, 10);
+    const pending = this.listApprovals("pending");
+    const oldest = pending.map((a) => a.requestedAt).sort()[0] ?? null;
+    const stateOf = (spent: number, budget: number): "ok" | "near" | "over" => (spent > budget ? "over" : budget > 0 && spent * 100 >= budget * 80 ? "near" : "ok");
+    const rows = o.budgets.map((b) => ({ ...b, percent: b.budget > 0 ? Math.round((b.spent / b.budget) * 100) : b.spent > 0 ? 100 : 0, state: stateOf(b.spent, b.budget) }));
+    return {
+      generatedAt: o.generatedAt,
+      day,
+      today: o.byDay.filter((d) => d.day === day).map(({ currency, spent, held, blocked }) => ({ currency, spent, held, blocked })),
+      pendingApprovals: { count: pending.length, oldestRequestedAt: oldest },
+      attention: o.needsAttention.length,
+      budgets: rows,
+      needsAttention: pending.length > 0 || o.needsAttention.length > 0 || rows.some((b) => b.state !== "ok"),
+    };
   }
 
   getDecisionRecord(key: string): DecisionRecord | null {
@@ -700,6 +845,15 @@ export class Store {
     );
   }
 
+  /** Minor units paid this UTC calendar month, per vendor id: what a vendor's monthly budget is measured against. */
+  private vendorSpentThisMonth(now: Date): Record<string, number> {
+    const monthStart = `${now.toISOString().slice(0, 7)}-01T00:00:00.000Z`;
+    const rows = this.db
+      .prepare("SELECT vendor_id, SUM(amount) AS total FROM payments WHERE created_at >= ? AND vendor_id IS NOT NULL GROUP BY vendor_id")
+      .all(monthStart) as { vendor_id: string; total: number }[];
+    return Object.fromEntries(rows.map((r) => [r.vendor_id, r.total]));
+  }
+
   private stateFor(i: ResolvedIntent, now: Date): PolicyState {
     const iso = now.toISOString();
     const dayStart = `${iso.slice(0, 10)}T00:00:00.000Z`;
@@ -708,6 +862,7 @@ export class Store {
     const perVendor = this.db
       .prepare("SELECT vendor_id, SUM(amount) AS total FROM payments WHERE created_at >= ? AND vendor_id IS NOT NULL GROUP BY vendor_id")
       .all(dayStart) as { vendor_id: string; total: number }[];
+    const perVendorMonth = this.vendorSpentThisMonth(now);
     const totalToday = this.db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM payments WHERE created_at >= ?").get(dayStart) as { t: number };
     const recent = this.db
       .prepare("SELECT COUNT(*) AS n FROM payments WHERE agent_id = ? AND created_at > ?")
@@ -718,6 +873,7 @@ export class Store {
       vendors: this.listVendors(),
       purchaseOrder: this.purchaseOrderFor(i),
       vendorSpentToday: Object.fromEntries(perVendor.map((r) => [r.vendor_id, r.total])),
+      vendorSpentThisMonth: perVendorMonth,
       totalSpentToday: totalToday.t,
       paymentsLastHour: recent.n,
     };

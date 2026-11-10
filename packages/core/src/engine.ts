@@ -13,7 +13,8 @@ export type RuleId =
   | "approval_threshold"
   | "hard_limit"
   | "allowlist"
-  | "velocity";
+  | "velocity"
+  | "vendor_budget";
 
 export interface VendorRecord {
   id: string;
@@ -36,6 +37,8 @@ export interface PolicyState {
   purchaseOrder: PurchaseOrder | null;
   /** Minor units already paid today, keyed by vendor id. */
   vendorSpentToday: Readonly<Record<string, number>>;
+  /** Minor units paid this UTC month, keyed by vendor id. Absent means none, so callers that predate budgets keep working. */
+  vendorSpentThisMonth?: Readonly<Record<string, number>>;
   totalSpentToday: number;
   paymentsLastHour: number;
 }
@@ -139,6 +142,13 @@ export function evaluate(intent: ResolvedIntent, policy: Policy, state: PolicySt
     const spent = state.vendorSpentToday[vendor.id] ?? 0;
     if (spent + amount.value > policy.limits.perVendorPerDay) {
       add("hard_limit", "deny", `This would take ${vendor.name} past the ${money(policy.limits.perVendorPerDay, cur)} daily limit per vendor.`);
+    }
+  }
+  const budget = vendor ? policy.vendorMonthlyBudgets?.[vendor.id] : undefined;
+  if (vendor && budget !== undefined) {
+    const spent = state.vendorSpentThisMonth?.[vendor.id] ?? 0;
+    if (spent + amount.value > budget) {
+      add("vendor_budget", "require_approval", `This would take ${vendor.name} to ${money(spent + amount.value, cur)} this month, past its ${money(budget, cur)} monthly budget.`);
     }
   }
   if (state.totalSpentToday + amount.value > policy.limits.totalPerDay) {
