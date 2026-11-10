@@ -61,6 +61,23 @@ export function Spend() {
       {currencies.map((c) => (
         <CurrencySection key={c} currency={c} data={data} />
       ))}
+      {data.budgets.length > 0 && (
+        <Card title="Monthly budgets" aside="This UTC month. Past a budget, a payment is held for a person.">
+          {data.budgets.map((b) => {
+            const over = b.spent > b.budget;
+            const cur = data.totals[0]?.currency ?? "USD";
+            return (
+              <div className="bar-row" key={b.vendorId}>
+                <span>{b.name}</span>
+                <div className="bar" aria-hidden="true">
+                  <i className={over ? "bad" : "good"} style={{ width: `${b.budget > 0 ? Math.min(100, Math.round((b.spent / b.budget) * 100)) : 100}%` }} />
+                </div>
+                <span>{money(b.spent, cur)} of {money(b.budget, cur)}{over ? " · over" : ""}</span>
+              </div>
+            );
+          })}
+        </Card>
+      )}
       <Card title={`Open purchase orders · ${data.openCommitments.length}`} aside="Approved to buy, not yet paid">
         {data.openCommitments.length === 0 ? (
           <p className="muted">Nothing outstanding.</p>

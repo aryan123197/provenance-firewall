@@ -734,6 +734,7 @@ describe("Spend", () => {
     moneyProtected: [{ currency: "USD", count: 1, amount: 45000 }],
     openCommitments: [{ id: "po1", vendorId: "acme", amount: 4500, currency: "USD", status: "open", vendorName: "Acme Supplies" }],
     needsAttention: [line({ idempotencyKey: "k9", status: "attention", providerStatus: "unclaimed" })],
+    budgets: [{ vendorId: "acme", name: "Acme Supplies", budget: 10000, spent: 12000 }],
   };
 
   test("shows totals, money protected, unregistered payees, open orders, attention rows and the CSV link", async () => {
@@ -747,9 +748,10 @@ describe("Spend", () => {
     expect(screen.getByText("po1")).toBeTruthy();
     expect(screen.getByText(/Needs attention, PayPal unclaimed|Needs attention · PayPal unclaimed/)).toBeTruthy();
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toBe("/api/spend/export.csv");
+    expect(screen.getByText("$120.00 of $100.00 · over")).toBeTruthy();
   });
   test("an empty ledger says so and still offers nothing misleading", async () => {
-    mockApi({ "GET /api/spend": { body: { ...overview, totals: [], byDay: [], byVendor: [], moneyProtected: [], openCommitments: [], needsAttention: [] } } });
+    mockApi({ "GET /api/spend": { body: { ...overview, totals: [], byDay: [], byVendor: [], moneyProtected: [], openCommitments: [], needsAttention: [], budgets: [] } } });
     render(<Spend />);
     expect(await screen.findByText("No payments yet")).toBeTruthy();
     expect(screen.getByText("Nothing outstanding.")).toBeTruthy();

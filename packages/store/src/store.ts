@@ -149,6 +149,8 @@ export interface SpendOverview {
   moneyProtected: { currency: string; count: number; amount: number }[];
   openCommitments: (PurchaseOrderRecord & { vendorName: string })[];
   needsAttention: SpendLine[];
+  /** One row per vendor with a monthly budget in the active policy: this UTC month's payments against it. */
+  budgets: { vendorId: string; name: string; budget: number; spent: number }[];
 }
 
 const OUT = new Set<SpendStatus>(["paid", "sent", "attention"]);
@@ -450,7 +452,7 @@ export class Store {
   }
 
   /** Read-only roll-up of the ledger: nothing here changes a decision. Days are UTC, as the daily caps are. */
-  spendOverview(): SpendOverview {
+  spendOverview(budgets: Readonly<Record<string, number>> = {}): SpendOverview {
     const lines = this.spendLedger();
     const names = new Map(this.listVendors().map((v) => [v.id, v.name]));
     const totals = new Map<string, SpendOverview["totals"][number]>();
@@ -496,6 +498,7 @@ export class Store {
         .filter((p) => p.status === "open")
         .map((p) => ({ ...p, vendorName: names.get(p.vendorId) ?? p.vendorId })),
       needsAttention: lines.filter((l) => l.status === "attention" || l.status === "failed"),
+      budgets: Object.entries(budgets).map(([vendorId, budget]) => ({ vendorId, name: names.get(vendorId) ?? vendorId, budget, spent: this.vendorSpentThisMonth(this.clock())[vendorId] ?? 0 })),
     };
   }
 
@@ -809,6 +812,15 @@ export class Store {
     );
   }
 
+  /** Minor units paid this UTC calendar month, per vendor id: what a vendor's monthly budget is measured against. */
+  private vendorSpentThisMonth(now: Date): Record<string, number> {
+    const monthStart = `${now.toISOString().slice(0, 7)}-01T00:00:00.000Z`;
+    const rows = this.db
+      .prepare("SELECT vendor_id, SUM(amount) AS total FROM payments WHERE created_at >= ? AND vendor_id IS NOT NULL GROUP BY vendor_id")
+      .all(monthStart) as { vendor_id: string; total: number }[];
+    return Object.fromEntries(rows.map((r) => [r.vendor_id, r.total]));
+  }
+
   private stateFor(i: ResolvedIntent, now: Date): PolicyState {
     const iso = now.toISOString();
     const dayStart = `${iso.slice(0, 10)}T00:00:00.000Z`;
@@ -817,6 +829,7 @@ export class Store {
     const perVendor = this.db
       .prepare("SELECT vendor_id, SUM(amount) AS total FROM payments WHERE created_at >= ? AND vendor_id IS NOT NULL GROUP BY vendor_id")
       .all(dayStart) as { vendor_id: string; total: number }[];
+    const perVendorMonth = this.vendorSpentThisMonth(now);
     const totalToday = this.db.prepare("SELECT COALESCE(SUM(amount), 0) AS t FROM payments WHERE created_at >= ?").get(dayStart) as { t: number };
     const recent = this.db
       .prepare("SELECT COUNT(*) AS n FROM payments WHERE agent_id = ? AND created_at > ?")
@@ -827,6 +840,7 @@ export class Store {
       vendors: this.listVendors(),
       purchaseOrder: this.purchaseOrderFor(i),
       vendorSpentToday: Object.fromEntries(perVendor.map((r) => [r.vendor_id, r.total])),
+      vendorSpentThisMonth: perVendorMonth,
       totalSpentToday: totalToday.t,
       paymentsLastHour: recent.n,
     };

@@ -368,7 +368,10 @@ export function createApp(deps: AppDeps): FastifyInstance {
   app.get<{ Querystring: { after?: string; limit?: string } }>("/api/audit", async (req) => ({
     entries: deps.runtime().store.audit.entries({ after: intParam(req.query.after, 0, 0, Number.MAX_SAFE_INTEGER), limit: intParam(req.query.limit, 200, 1, 1000) }),
   }));
-  app.get("/api/spend", async () => deps.runtime().store.spendOverview());
+  app.get("/api/spend", async () => {
+    const { store, policy } = deps.runtime();
+    return store.spendOverview(policy().vendorMonthlyBudgets ?? {});
+  });
   // A ledger for the books. Payee names come from untrusted invoices, so cells that a spreadsheet would run as a formula are defused.
   app.get("/api/spend/export.csv", async (_req, reply) => {
     reply.header("content-type", "text/csv; charset=utf-8");

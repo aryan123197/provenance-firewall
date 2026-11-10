@@ -286,6 +286,25 @@ describe("spend overview", () => {
   });
 });
 
+describe("vendor monthly budgets", () => {
+  const budgeted = loadPolicy(`${readFileSync(new URL("../../../policies/default.policy.yaml", import.meta.url), "utf8")}\nvendorMonthlyBudgets:\n  acme: 10000\n`);
+  test("this month's payments count; last month's do not; a held payment can still be approved", () => {
+    now = new Date("2026-09-30T12:00:00.000Z");
+    store.decide(intent({ idempotencyKey: "old", amount: f("user", 9000) }), budgeted);
+    now = new Date("2026-10-01T00:00:00.000Z");
+    expect(store.decide(intent({ idempotencyKey: "m1", amount: f("user", 9000) }), budgeted).decision.verdict).toBe("allow");
+    const over = store.decide(intent({ idempotencyKey: "m2", amount: f("user", 2000) }), budgeted).decision;
+    expect(over).toMatchObject({ verdict: "require_approval", rule: "vendor_budget" });
+    const id = store.listApprovals("pending")[0]!.id;
+    expect(store.resolveApproval(id, { approve: true, approver: "alice" }, budgeted)).toMatchObject({ ok: true, status: "approved" });
+    expect(store.spendOverview({ acme: 10000, ghost: 500 }).budgets).toEqual([
+      { vendorId: "acme", name: "Acme Supplies", budget: 10000, spent: 11000 },
+      { vendorId: "ghost", name: "ghost", budget: 500, spent: 0 },
+    ]);
+    expect(store.spendOverview().budgets).toEqual([]);
+  });
+});
+
 describe("policy versions", () => {
   test("there is no active stored policy until one is activated", () => {
     expect(store.activePolicy()).toBeNull();

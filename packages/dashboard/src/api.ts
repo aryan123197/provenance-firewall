@@ -99,6 +99,7 @@ export interface PolicyView {
     velocity: { maxPerHour: number };
     categoryApprovalThresholds: Record<string, number>;
     newPayeeDenyDays: number[];
+    vendorMonthlyBudgets?: Record<string, number>;
   };
   yaml: string;
 }

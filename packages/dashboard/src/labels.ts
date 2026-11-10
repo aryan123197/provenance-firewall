@@ -20,6 +20,7 @@ export const RULES: Record<string, { title: string; what: string }> = {
   approval_threshold: { title: "Above approval threshold", what: "The amount is above the limit that can be paid without a person's approval." },
   hard_limit: { title: "Hard limit exceeded", what: "The payment would exceed a per-payment, per-vendor or daily cap. Approval cannot override a cap." },
   allowlist: { title: "Category not allowed", what: "The vendor's category is not on the policy's allowlist." },
+  vendor_budget: { title: "Over the vendor's monthly budget", what: "This payment would take a vendor past the monthly budget in the policy. A person can still approve it." },
   velocity: { title: "Too many payments", what: "This agent has made too many payments in the last hour." },
   currency: { title: "Unsupported currency", what: "The policy only covers one currency." },
 };
